@@ -47,8 +47,8 @@ class RandomSizedCrop(object):
                 assert(label.size == (w,h))
 
                 return img.resize(self.size, self.img_interpolation),label.resize(self.size,self.label_interpolation)
-        # Add a fallback method
-        img_scale = transforms.Scale(self.size,interpolation=self.img_interpolation)
-        label_scale = transforms.Scale(self.size,interpolation=self.label_interpolation)
+        #Add a fallback method
+        img_scale = transforms.Scale(self.size[0],interpolation=self.img_interpolation)
+        label_scale = transforms.Scale(self.size[0],interpolation=self.label_interpolation)
         crop = transforms.CenterCrop(self.size)
         return crop(img_scale(img)), crop(label_scale(label))
