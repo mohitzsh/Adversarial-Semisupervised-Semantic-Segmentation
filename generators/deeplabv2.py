@@ -169,38 +169,30 @@ class ResNet(nn.Module):
         return block(dilation_series,padding_series,NoLabels)
 
     def forward(self, x):
+        # print("x : ",x.size())
         x = self.conv1(x)
+        # print("conv1: ",x.size())
         x = self.bn1(x)
+        # print("bn1: ",x.size())
         x = self.relu(x)
+        # print("relu: ",x.size())
         x = self.maxpool(x)
+        # print("maxpool: ",x.size())
         x = self.layer1(x)
+        # print("layer1: ",x.size())
         x = self.layer2(x)
+        # print("layer2: ",x.size())
         x = self.layer3(x)
+        # print("layer3: ",x.size())
         x = self.layer4(x)
+        # print("layer4: ",x.size())
         x = self.layer5(x)
+        # print("layer5: ",x.size())
         x = self.up(x)
+        # print("up ",x.size())
         x = self.down(x)
+        # print("down ",x.size())
         return x
-
-# class MS_Deeplab(nn.Module):
-#     def __init__(self,block,NoLabels):
-#         super(MS_Deeplab,self).__init__()
-#         self.Scale = ResNet(block,[3, 4, 23, 3],NoLabels)   #changed to fix #4
-#
-#     def forward(self,x):
-#
-#         out = self.Scale(x)	# for original scale
-#         # out.append(self.interp3(self.Scale(x2)))	# for 0.75x scale
-#         # out.append(self.Scale(x3))	# for 0.5x scale
-#         #
-#         #
-#         # x2Out_interp = out[1]
-#         # x3Out_interp = self.interp3(out[2])
-#         # temp1 = torch.max(out[0],x2Out_interp)
-#         # out.append(torch.max(temp1,x3Out_interp))
-#
-#         # out = self.Scale(x)
-#         return out
 
 def Res_Deeplab(NoLabels=21):
     return ResNet(Bottleneck,[3, 4, 23, 3],NoLabels)

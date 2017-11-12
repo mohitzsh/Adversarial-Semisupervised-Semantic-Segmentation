@@ -83,7 +83,7 @@ def main():
 
 
     print('Training Going to Start')
-    for iteration in range(0,args.max_iter):
+    for iteration in range(args.start_iter,args.max_iter+1):
 
         for batch_id, (img,mask) in enumerate(trainloader):
             img,mask = Variable(img.cuda()),Variable(mask.cuda())
