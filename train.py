@@ -28,11 +28,13 @@ def main():
     parser.add_argument("--max_iter",help="Maximum iterations.",default=20000,\
                         type=int)
     parser.add_argument("--start_iter",help="Resume training from this iteration",\
-                        default=0,type=int)
+                        default=1,type=int)
     parser.add_argument("--snapshot",help="Snapshot to resume training")
     parser.add_argument("--snapshot_iter",help="Iterations for taking snapshot",default=5000,type=int)
     parser.add_argument("--snapshot_dir",help="Location to store the snapshot", \
                         default=os.path.join(home_dir,'data','snapshots'))
+    #Try to see if available gpus can be detected at runtime
+    parser.add_argument("--gpu",help="GPU to use for training",default=0,type=int)
 
     # Add arguments for Optimizer later
     args = parser.parse_args()
@@ -47,7 +49,7 @@ def main():
 
     print("Dataset setup done!")
     # Prepare the Generator
-    generator = deeplabv2.Res_Deeplab().cuda()
+    generator = deeplabv2.Res_Deeplab().cuda(args.gpu)
     print("Generator setup done!")
     # Prepare the optimizer
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
@@ -86,7 +88,7 @@ def main():
     for iteration in range(args.start_iter,args.max_iter+1):
 
         for batch_id, (img,mask) in enumerate(trainloader):
-            img,mask = Variable(img.cuda()),Variable(mask.cuda())
+            img,mask = Variable(img.cuda(args.gpu)),Variable(mask.cuda(args.gpu))
             out_img_map = generator(img)
             out_img_map = nn.LogSoftmax()(out_img_map)
             L_ce = nn.NLLLoss2d()
