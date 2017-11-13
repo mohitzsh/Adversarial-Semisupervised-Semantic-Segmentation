@@ -18,7 +18,7 @@ def read_img_list(filename):
         img_list = []
         for line in f:
             img_list.append(line[:-1])
-    return img_list[:50]
+    return img_list
 
 def extract_class_mask(label,c):
 # Get one-hot encoding

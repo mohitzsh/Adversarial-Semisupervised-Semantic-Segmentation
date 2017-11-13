@@ -25,17 +25,16 @@ def main():
 
     parser.add_argument("dataset_dir",help="A directory containing img (Images) \
                         and cls (GT Segmentation) folder")
-    parser.add_argument("--max_iter",help="Maximum iterations.",default=20000,\
+    parser.add_argument("--max_epoch",help="Maximum iterations.",default=20,\
                         type=int)
-    parser.add_argument("--start_iter",help="Resume training from this iteration",\
+    parser.add_argument("--start_epoch",help="Resume training from this epoch",\
                         default=1,type=int)
     parser.add_argument("--snapshot",help="Snapshot to resume training")
-    parser.add_argument("--snapshot_iter",help="Iterations for taking snapshot",default=5000,type=int)
     parser.add_argument("--snapshot_dir",help="Location to store the snapshot", \
                         default=os.path.join(home_dir,'data','snapshots'))
     #Try to see if available gpus can be detected at runtime
-    parser.add_argument("--gpu",help="GPU to use for training",default=0,type=int)
-    parser.add_argument("--batch_size",help="Batch size for training",default=64,type=int)
+    # parser.add_argument("--gpu",help="GPU to use for training",default=0,type=int)
+    parser.add_argument("--batch_size",help="Batch size for training",default=10,type=int)
 
     # Add arguments for Optimizer later
     args = parser.parse_args()
@@ -61,7 +60,7 @@ def main():
     # Load the snapshot if available
     if  args.snapshot and os.path.isfile(args.snapshot):
         snapshot = torch.load(args.snapshot)
-        args.start_iter = snapshot['iter']
+        args.start_epoch = snapshot['epoch']
         generator.load_state_dict(snapshot['state_dict'])
         optimizer.load_state_dict(snapshot['optimizer'])
         print("Snapshot Available. Resuming Training from iter: {} ".format(args.start_iter))
@@ -87,7 +86,7 @@ def main():
     logfile = open("log.txt",'w')
 
     print('Training Going to Start')
-    for iteration in range(args.start_iter,args.max_iter+1):
+    for epoch in range(args.start_epoch,args.max_epoch+1):
 
         for batch_id, (img,mask) in enumerate(trainloader):
             img,mask = Variable(img.cuda()),Variable(mask.cuda())
@@ -98,22 +97,24 @@ def main():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        logfile.write('Train Iter: {} Loss: {:.6f}\n'.format(iteration,  loss.data[0]))
-        if iteration % args.snapshot_iter == 0:
-            # Flush the log file
-            logfile.flush()
-            state = {
-                'iter': iteration,
-                'state_dict': generator.state_dict(),
-                'optimizer': optimizer.state_dict()
-            }
-            # Write the new snapshot and delete all other snapshots
-            curr_snapshot = os.path.join(args.snapshot_dir,'{}.pth.tar'.format(iteration))
-            torch.save(state,curr_snapshot)
-            filelist = os.listdir(args.snapshot_dir)
-            filelist = list(filter(lambda f: f != '{}.pth.tar'.format(iteration), filelist))
-            for f in filelist:
-                os.remove(os.path.join(args.snapshot_dir,f))
+            logfile.write('Epoch {} Batch_id : {} Loss: {:.6f}\n'.format(epoch,batch_id,  loss.data[0]))
+            print('Epoch {} Batch_id : {} Loss: {:.6f}\n'.format(epoch,batch_id,  loss.data[0]))
+        print("Preparing to Write the snapshot")
+        # Flush the log file
+        logfile.flush()
+        state = {
+            'epoch': epoch,
+            'state_dict': generator.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }
+        # Write the new snapshot and delete all other snapshots
+        curr_snapshot = os.path.join(args.snapshot_dir,'{}.pth.tar'.format(epoch))
+        torch.save(state,curr_snapshot)
+        filelist = os.listdir(args.snapshot_dir)
+        filelist = list(filter(lambda f: f != '{}.pth.tar'.format(epoch), filelist))
+        for f in filelist:
+            os.remove(os.path.join(args.snapshot_dir,f))
+        print("Snapshot written")
 
 
 if __name__ == '__main__':
