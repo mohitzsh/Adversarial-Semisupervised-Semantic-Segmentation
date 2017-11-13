@@ -35,6 +35,7 @@ def main():
                         default=os.path.join(home_dir,'data','snapshots'))
     #Try to see if available gpus can be detected at runtime
     parser.add_argument("--gpu",help="GPU to use for training",default=0,type=int)
+    parser.add_argument("--batch_size",help="Batch size for training",default=64,type=int)
 
     # Add arguments for Optimizer later
     args = parser.parse_args()
@@ -45,11 +46,11 @@ def main():
 
     trainset = PascalVOC(home_dir,args.dataset_dir,transform=transform, \
         co_transform=co_transform)
-    trainloader = DataLoader(trainset,batch_size=10,shuffle=True,num_workers=2)
+    trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2)
 
     print("Dataset setup done!")
     # Prepare the Generator
-    generator = deeplabv2.Res_Deeplab().cuda(args.gpu)
+    generator = deeplabv2.Res_Deeplab()
     print("Generator setup done!")
     # Prepare the optimizer
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
@@ -66,7 +67,7 @@ def main():
         print("Snapshot Available. Resuming Training from iter: {} ".format(args.start_iter))
 
     else:
-        print("No Snapshot. Loading {}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
+        print("No Snapshot. Loading '{}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
         saved_net = torch.load(os.path.join(home_dir,'data',\
             'MS_DeepLab_resnet_pretrained_COCO_init.pth'))
         new_state = generator.state_dict()
@@ -77,18 +78,19 @@ def main():
 
     print('Generator Net created')
 
+    generator = nn.DataParallel(generator).cuda()
     # Setup the optimizer
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
 
-
+    logfile = open("log.txt",'w')
 
     print('Training Going to Start')
     for iteration in range(args.start_iter,args.max_iter+1):
 
         for batch_id, (img,mask) in enumerate(trainloader):
-            img,mask = Variable(img.cuda(args.gpu)),Variable(mask.cuda(args.gpu))
+            img,mask = Variable(img.cuda()),Variable(mask.cuda())
             out_img_map = generator(img)
             out_img_map = nn.LogSoftmax()(out_img_map)
             L_ce = nn.NLLLoss2d()
@@ -96,14 +98,23 @@ def main():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print('Train Iter: {} Loss: {:.6f}'.format(iteration,  loss.data[0]))
+        logfile.write('Train Iter: {} Loss: {:.6f}\n'.format(iteration,  loss.data[0]))
         if iteration % args.snapshot_iter == 0:
+            # Flush the log file
+            logfile.flush()
             state = {
                 'iter': iteration,
                 'state_dict': generator.state_dict(),
                 'optimizer': optimizer.state_dict()
             }
-            torch.save(state,os.path.join(args.snapshot_dir,'{}.pth.tar'.format(iteration)))
+            # Write the new snapshot and delete all other snapshots
+            curr_snapshot = os.path.join(args.snapshot_dir,'{}.pth.tar'.format(iteration))
+            torch.save(state,curr_snapshot)
+            filelist = os.listdir(args.snapshot_dir)
+            filelist = list(filter(lambda f: f != '{}.pth.tar'.format(iteration), filelist))
+            for f in filelist:
+                os.remove(os.path.join(args.snapshot_dir,f))
+
 
 if __name__ == '__main__':
     main()
