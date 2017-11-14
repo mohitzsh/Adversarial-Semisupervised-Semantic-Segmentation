@@ -130,14 +130,16 @@ class ResNet(nn.Module):
         for i in self.bn1.parameters():
             i.requires_grad = False
         self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, ceil_mode=True) # change
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, ceil_mode=True)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=1, dilation__ = 2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=1, dilation__ = 4)
         self.layer5 = self._make_pred_layer(Classifier_Module, [6,12,18,24],[6,12,18,24],NoLabels)
-        self.up = nn.UpsamplingBilinear2d(scale_factor=8)
-        self.down = nn.Conv2d(NoLabels,NoLabels,kernel_size=8)
+
+        self.up_layer2 = nn.ConvTranspose2d(NoLabels,NoLabels,1,stride=2)
+        self.up_maxpool = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
+        self.up_conv1 = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -188,10 +190,11 @@ class ResNet(nn.Module):
         # print("layer4: ",x.size())
         x = self.layer5(x)
         # print("layer5: ",x.size())
-        x = self.up(x)
+        x = self.up_layer2(x)
         # print("up ",x.size())
-        x = self.down(x)
-        # print("down ",x.size())
+        x = self.up_maxpool(x)
+
+        x = self.up_conv1(x)
         return x
 
 def Res_Deeplab(NoLabels=21):
