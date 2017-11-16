@@ -5,6 +5,67 @@ import math
 import random
 import torchvision.transforms as transforms
 
+stats = {
+    'voc': {
+        'mean': np.array([104.00699, 116.66877, 122.67892],float),
+        'std': np.array([1,1,1],float)
+    }
+}
+class NormalizeOwn(object):
+    """
+        Normalize the dataset to zero mean and unit standard deviation.
+    """
+    def __init__(self,dataset='voc'):
+        self.dataset = dataset
+
+    def __call__(self,img):
+        return transforms.Normalize(mean=stats[self.dataset]['mean'],std=stats[self.dataset]['std'])(img)
+
+class IgnoreLabelClass(object):
+    """
+        Convert a label for a class to be ignored to some other class
+    """
+    def __init__(self,ignore=255,base=0):
+        self.ignore = ignore
+        self.base = base
+
+    def __call__(self,label):
+        return Image.eval(label,lambda p: 0 if p == 255 else p)
+
+class ToTensorLabel(object):
+    """
+        Convert a Label as PIL.Image with 'P' mode and convert to Tensor
+    """
+    def __init__(self,tensor_type=torch.LongTensor):
+        self.tensor_type = tensor_type
+
+    def __call__(self,label):
+        label = np.array(label,dtype=np.uint8)
+        label = torch.from_numpy(label).type(self.tensor_type)
+
+        return label
+
+class ZeroPadding(object):
+    """
+        Add zero padding to the image to right and bottom to resize it.
+        Needed at test phase to make all images 513x513.
+
+        Input: PIL Image with 'RGB' mode
+        Output: Zero padded PIL image with agin with 'RGB' mode
+
+    """
+    def __init__(self,size=(513,513)):
+        self.size = size
+
+
+    def __call__(self,img):
+        assert(img.size[0]<=self.size[0] and img.size[1] <= self.size[1])
+
+        img_new = np.zeros((self.size[0],self.size[1],3),np.uint8)
+        img_orig = np.array(img,np.uint8)
+        img_new[:img_orig.shape[0],:img_orig.shape[1],:] = img_orig
+        return img_new
+
 class RandomSizedCrop(object):
     """
         RandomSizedCrop for both the image and the label
@@ -30,9 +91,6 @@ class RandomSizedCrop(object):
 
             w = int(round(math.sqrt(target_area * rand_aspect_ratio)))
             h = int(round(math.sqrt(target_area / rand_aspect_ratio)))
-
-            # w_label = int(round(math.sqrt(target_label_area * rand_aspect_ratio)))
-            # h_label = int(round(math.sqrt(target_label_area / rand_aspect_ratio)))
 
             if random.random() < 0.5:
                 w, h = h, w

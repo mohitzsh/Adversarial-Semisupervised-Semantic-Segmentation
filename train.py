@@ -8,13 +8,15 @@ import discriminators.discriminator as dis
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from utils.transforms import RandomSizedCrop
+from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn
+from utils.lr_scheduling import poly_lr_scheduler
 import torch.nn.functional as F
 import torch.nn as nn
 from functools import reduce
 import torch.optim as optim
 import os
 import argparse
+from torchvision.transforms import ToTensor
 
 def main():
 
@@ -32,26 +34,26 @@ def main():
     parser.add_argument("--snapshot",help="Snapshot to resume training")
     parser.add_argument("--snapshot_dir",help="Location to store the snapshot", \
                         default=os.path.join(home_dir,'data','snapshots'))
-    #Try to see if available gpus can be detected at runtime
-    # parser.add_argument("--gpu",help="GPU to use for training",default=0,type=int)
     parser.add_argument("--batch_size",help="Batch size for training",default=10,type=int)
 
     # Add arguments for Optimizer later
     args = parser.parse_args()
 
     # Define the transforms for the data
-    transform = transforms.Compose([transforms.ToTensor()])
-    co_transform = transforms.Compose([RandomSizedCrop((321,321))])
 
-    trainset = PascalVOC(home_dir,args.dataset_dir,transform=transform, \
+    img_transform = transforms.Compose([ToTensor(),NormalizeOwn(dataset='voc')])
+    label_transform = transforms.Compose([IgnoreLabelClass(),ToTensorLabel()])
+
+    co_transform = transforms.Compose([RandomSizedCrop((321,321))])
+    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=img_transform, label_transform=label_transform, \
         co_transform=co_transform)
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2)
 
     print("Dataset setup done!")
-    # Prepare the Generator
+
     generator = deeplabv2.Res_Deeplab()
     print("Generator setup done!")
-    # Prepare the optimizer
+
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
@@ -61,7 +63,8 @@ def main():
     if  args.snapshot and os.path.isfile(args.snapshot):
         snapshot = torch.load(args.snapshot)
         args.start_epoch = snapshot['epoch']
-        generator.load_state_dict(snapshot['state_dict'])
+        saved_net = {k.partition('module.')[2]: v for i, (k,v) in enumerate(snapshot['state_dict'].items())}
+        generator.load_state_dict(saved_net)
         optimizer.load_state_dict(snapshot['optimizer'])
         print("Snapshot Available. Resuming Training from iter: {} ".format(args.start_iter))
 
@@ -94,6 +97,8 @@ def main():
             out_img_map = nn.LogSoftmax()(out_img_map)
             L_ce = nn.NLLLoss2d()
             loss = L_ce(out_img_map,mask.long())
+            i = len(trainloader)*(epoch-1) + batch_id
+            poly_lr_scheduler(optimizer, 0.00025, i)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
