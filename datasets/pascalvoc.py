@@ -15,10 +15,6 @@ def read_img_list(filename):
             img_list.append(line[:-1])
     return img_list
 
-
-"""
-    Implicitly applies ToTensor() transformation to both image and label
-"""
 class PascalVOC(Dataset):
 
     TRAIN_LIST = "lists/train.txt"
@@ -51,31 +47,6 @@ class PascalVOC(Dataset):
         image, label = self.co_transform((image,label))
         image = self.img_transform(image)
         label = self.label_transform(label)
-
-        # # TODO: Add this as a transform for the label
-        # label = Image.eval(label,lambda p: 0 if p == 255 else p)
-        #
-        #
-        # #If the test phase, pad the image and label with zeros to make the size 513x513
-        # # if not self.train_phase:
-        # if False:
-        #     # New image is 513x513x3
-        #     img_new = np.zeros((513,513,3),np.uint8)
-        #     img_orig = np.array(image,np.uint8)
-        #     img_new[:img_orig.shape[0],:img_orig.shape[1],:] = img_orig
-        #     image = img_new
-        #
-        #     # No Padding for target mask.
-        #     label = np.array(label,dtype=np.uint8)
-        #
-        #     # Convert to Tensors
-        #     label = torch.from_numpy(label).long()
-        #     image = transforms.ToTensor()(image)
-        # else:
-        #     # image = transforms.ToTensor()(image)
-        #     # In training, label still needs to be converted to tensor
-        #     label_a = np.array(label,dtype=np.uint8)
-        #     label = torch.from_numpy(label_a).long()
 
         return image, label
 

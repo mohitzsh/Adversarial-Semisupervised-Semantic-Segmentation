@@ -12,6 +12,7 @@ import torchvision.transforms as transforms
 from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn, ZeroPadding
 from torchvision.transforms import ToTensor
 
+
 def main():
     home_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -19,7 +20,7 @@ def main():
     parser.add_argument("dataset_dir",help="A directory containing img (Images) \
                         and cls (GT Segmentation) folder")
     parser.add_argument("snapshot",help="Snapshot with the saved model")
-    parser.add_argument("--infer_orig", help="Do Inference on original size image.\
+    parser.add_argument("--val_orig", help="Do Inference on original size image.\
                         Otherwise, crop to 321x321 like in training ",action='store_true')
     parser.add_argument("--norm",help="Normalize the test images",\
                         action='store_true')
@@ -28,7 +29,7 @@ def main():
     if args.infer_orig:
         img_transform = transforms.Compose([ToTensor()])
         if args.norm:
-            img_transform.append(NormalizeOwn(dataset='voc'))
+            img_transform = transforms.Compose([ToTensor(),NormalizeOwn(dataset='voc')])
         label_transform = transforms.Compose([IgnoreLabelClass(),ToTensorLabel()])
         co_transform = transforms.Compose([RandomSizedCrop((321,321))])
 
@@ -38,14 +39,12 @@ def main():
     else:
         img_transform = transforms.Compose([ZeroPadding(),ToTensor()])
         if args.norm:
-            img_transform.append(NormalizeOwn(dataset='voc'))
+            img_transform = img_transform = transforms.Compose([ZeroPadding(),ToTensor(),NormalizeOwn(dataset='voc')])
         label_transform = transforms.Compose([IgnoreLabelClass(),ToTensorLabel()])
 
         testset = PascalVOC(home_dir,args.dataset_dir,img_transform=img_transform, \
             label_transform=label_transform,train_phase=False)
         testloader = DataLoader(testset,batch_size=1)
-
-    import pdb; pdb.set_trace()
 
     generator = deeplabv2.Res_Deeplab()
     assert(os.path.isfile(args.snapshot))

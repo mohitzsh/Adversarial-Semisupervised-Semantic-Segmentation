@@ -8,7 +8,7 @@ import discriminators.discriminator as dis
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn
+from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn,ZeroPadding
 from utils.lr_scheduling import poly_lr_scheduler
 import torch.nn.functional as F
 import torch.nn as nn
@@ -16,7 +16,8 @@ from functools import reduce
 import torch.optim as optim
 import os
 import argparse
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor,Compose
+from utils.validate import Validator
 
 def main():
 
@@ -25,6 +26,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("prefix",help="Prefix to identify current experiment")
     parser.add_argument("dataset_dir",help="A directory containing img (Images) \
                         and cls (GT Segmentation) folder")
     parser.add_argument("--max_epoch",help="Maximum iterations.",default=20,\
@@ -34,31 +36,43 @@ def main():
     parser.add_argument("--snapshot",help="Snapshot to resume training")
     parser.add_argument("--snapshot_dir",help="Location to store the snapshot", \
                         default=os.path.join(home_dir,'data','snapshots'))
-    parser.add_argument("--batch_size",help="Batch size for training",default=10,type=int)
-
-    # Add arguments for Optimizer later
+    parser.add_argument("--batch_size",help="Batch size for training",default=10,\
+                        type=int)
+    parser.add_argument("--val_orig", help="Do Inference on original size image.\
+                        Otherwise, crop to 321x321 like in training ",action='store_true')
     args = parser.parse_args()
 
-    # Define the transforms for the data
+    # Load the trainloader
+    img_transform = [ToTensor(),NormalizeOwn(dataset='voc')]
+    label_transform = [IgnoreLabelClass(),ToTensorLabel()]
+    co_transform = [RandomSizedCrop((321,321))]
 
-    img_transform = transforms.Compose([ToTensor(),NormalizeOwn(dataset='voc')])
-    label_transform = transforms.Compose([IgnoreLabelClass(),ToTensorLabel()])
-
-    co_transform = transforms.Compose([RandomSizedCrop((321,321))])
-    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=img_transform, label_transform=label_transform, \
-        co_transform=co_transform)
+    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), label_transform=Compose(label_transform), \
+        co_transform=Compose(co_transform))
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2)
 
-    print("Dataset setup done!")
+    print("Training Data Loaded")
+
+    # Load the valoader
+    if not args.val_orig:
+        img_transforms = [ToTensor(),NormalizeOwn(dataset='voc')]
+        label_transforms = [IgnoreLabelClass(),ToTensorLabel()]
+        co_transforms = [RandomSizedCrop((321,321))]
+    else:
+        img_transform = [ZeroPadding(),ToTensor(),NormalizeOwn(dataset='voc')]
+        label_transform = [IgnoreLabelClass(),ToTensorLabel()]
+        co_transform = []
+
+    valset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), \
+        label_transform = Compose(label_transform),co_transform=Compose(co_transform),train_phase=False)
+
+    valoader = DataLoader(valset,batch_size=1)
+
+    print("Validation Data Loaded")
 
     generator = deeplabv2.Res_Deeplab()
-    print("Generator setup done!")
+    print("Generator Loaded!")
 
-    optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
-        generator.parameters()),lr=0.00025,momentum=0.9,\
-        weight_decay=0.0001,nesterov=True)
-
-    print("Optimizer setup done")
     # Load the snapshot if available
     if  args.snapshot and os.path.isfile(args.snapshot):
         snapshot = torch.load(args.snapshot)
@@ -73,24 +87,22 @@ def main():
         saved_net = torch.load(os.path.join(home_dir,'data',\
             'MS_DeepLab_resnet_pretrained_COCO_init.pth'))
         new_state = generator.state_dict()
-        # Remove Scale. prefix from all the saved_net keys
         saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
         new_state.update(saved_net)
         generator.load_state_dict(new_state)
 
-    print('Generator Net created')
-
     generator = nn.DataParallel(generator).cuda()
-    # Setup the optimizer
+    print("Generator Setup for Parallel Training")
+
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
 
-    logfile = open("log.txt",'w')
-
+    print("Optimizer Loaded")
+    best_miou = -1
     print('Training Going to Start')
     for epoch in range(args.start_epoch,args.max_epoch+1):
-
+        generator.train()
         for batch_id, (img,mask) in enumerate(trainloader):
             img,mask = Variable(img.cuda()),Variable(mask.cuda())
             out_img_map = generator(img)
@@ -102,24 +114,23 @@ def main():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            logfile.write('Epoch {} Batch_id : {} Loss: {:.6f}\n'.format(epoch,batch_id,  loss.data[0]))
-            print('Epoch {} Batch_id : {} Loss: {:.6f}\n'.format(epoch,batch_id,  loss.data[0]))
-        print("Preparing to Write the snapshot")
-        # Flush the log file
-        logfile.flush()
-        state = {
+        print("Epoch {} Finished!".format(epoch))
+
+        snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),
-            'optimizer': optimizer.state_dict()
+            'optimizer': optimizer.state_dict(),
+
         }
-        # Write the new snapshot and delete all other snapshots
-        curr_snapshot = os.path.join(args.snapshot_dir,'{}.pth.tar'.format(epoch))
-        torch.save(state,curr_snapshot)
-        filelist = os.listdir(args.snapshot_dir)
-        filelist = list(filter(lambda f: f != '{}.pth.tar'.format(epoch), filelist))
-        for f in filelist:
-            os.remove(os.path.join(args.snapshot_dir,f))
-        print("Snapshot written")
+        generator.eval()
+        miou = Validator(generator,valoader).validate()
+
+        snapshot['miou'] = miou
+        if miou > best_miou:
+            print("Best miou: {}, at epoch: {}".format(miou,epoch))
+            best_miou = miou
+            torch.save(snapshot,os.path.join(args.snapshot_dir,'{}.pth.tar'.format(args.prefix)))
+            print("Snapshot written")
 
 
 if __name__ == '__main__':

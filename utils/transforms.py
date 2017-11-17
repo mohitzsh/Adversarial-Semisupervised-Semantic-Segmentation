@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 
 stats = {
     'voc': {
-        'mean': np.array([104.00699, 116.66877, 122.67892],float),
+        'mean': np.array([0.40787, 0.45752, 0.48109],float),
         'std': np.array([1,1,1],float)
     }
 }
