@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 
 stats = {
     'voc': {
-        'mean': np.array([0.40787, 0.45752, 0.48109],float),
+        'mean': np.array([0.48109,0.40787,0.45752],float),
         'std': np.array([1,1,1],float)
     }
 }
@@ -30,7 +30,7 @@ class IgnoreLabelClass(object):
         self.base = base
 
     def __call__(self,label):
-        return Image.eval(label,lambda p: 0 if p == 255 else p)
+        return Image.eval(label,lambda p: self.base if p == self.ignore else p)
 
 class ToTensorLabel(object):
     """

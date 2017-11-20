@@ -26,7 +26,7 @@ def main():
                         action='store_true')
     args = parser.parse_args()
 
-    if args.infer_orig:
+    if args.val_orig:
         img_transform = transforms.Compose([ToTensor()])
         if args.norm:
             img_transform = transforms.Compose([ToTensor(),NormalizeOwn(dataset='voc')])
@@ -78,10 +78,6 @@ def main():
             preds.append(pred_)
     score, class_iou = scores(gts, preds, n_class=n_classes)
 
-    for k, v in score.items():
-        print('{} {}'.format(k,v))
-
-    for i in range(n_classes):
-        print('{} {}'.format(i, class_iou[i]))
+    print("Mean IoU: {}".format(score))
 if __name__ == '__main__':
     main()

@@ -2,6 +2,7 @@ import torch.nn as nn
 import math
 import torch
 import numpy as np
+import torch.nn.functional as F
 affine_par = True
 
 
@@ -15,7 +16,6 @@ def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
-
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -137,9 +137,9 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=1, dilation__ = 4)
         self.layer5 = self._make_pred_layer(Classifier_Module, [6,12,18,24],[6,12,18,24],NoLabels)
 
-        self.up_layer2 = nn.ConvTranspose2d(NoLabels,NoLabels,1,stride=2)
-        self.up_maxpool = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
-        self.up_conv1 = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
+        # self.up_layer2 = nn.ConvTranspose2d(NoLabels,NoLabels,1,stride=2)
+        # self.up_maxpool = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
+        # self.up_conv1 = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -147,8 +147,8 @@ class ResNet(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-        #        for i in m.parameters():
-        #            i.requires_grad = False
+                for i in m.parameters():
+                   i.requires_grad = False
 
     def _make_layer(self, block, planes, blocks, stride=1,dilation__ = 1):
         downsample = None
@@ -190,11 +190,15 @@ class ResNet(nn.Module):
         # print("layer4: ",x.size())
         x = self.layer5(x)
         # print("layer5: ",x.size())
-        x = self.up_layer2(x)
-        # print("up ",x.size())
-        x = self.up_maxpool(x)
+        # x = self.up_layer2(x)
+        x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
 
-        x = self.up_conv1(x)
+        # print("up ",x.size())
+        # x = self.up_maxpool(x)
+        x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
+
+        # x = self.up_conv1(x)
+        x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
         return x
 
 def Res_Deeplab(NoLabels=21):
