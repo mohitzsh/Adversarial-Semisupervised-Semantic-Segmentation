@@ -1,7 +1,7 @@
 # [Adversarial Learning For Semi-Supervised Semantic Segmentation](https://openreview.net/references/pdf?id=HkTgsG-CW "Open Review")
 ## ICLR Reproducibility Challenge 2018
 
-## Experiment Details
+### Baseline Model
 | Name| Details | mIoU |
 | --- | --- | --- |
 |101| - No Normalization <br>  - No gradient for batch norm <br> - Drop last batch if not complete <br> - Volatile = false for eval <br> - Poly Decay every 10 iterations | 35.91 |
