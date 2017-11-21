@@ -15,7 +15,7 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 ## Updates
 * ***20th Nov 2017***: Started working on adding adversarial learning for base-104 segmentation network.
 
-* ***17th Nov 2017***: Baseline model (base-104) achieved  mean IoU of **69.78** on the full dataset. The model is still significantly away from the target mIoU of 73.6. Only significant component missing from the implementation is using Resnet-101 pre-trained on Imagenet (I am currently using MS-COCO pretrained Network as the baseline). Other minor additions (normalization of the input, number of iterations to wait before lr decay, etc) will also be added.  
+* ***17th Nov 2017***: Baseline model (base-104) achieved  mean IoU of **69.78** on the full dataset. The model is still significantly away from the target mIoU of 73.6. Only significant component missing from the implementation is using Resnet-101 pre-trained on Imagenet (I am currently using MS-COCO pretrained Network as the baseline). Other minor additions (normalization of the input, number of iterations to wait before lr decay, etc) will also be included.  
 
 ## Journey
 ### Baseline Model
@@ -24,4 +24,4 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 |base-101| - No Normalization <br>  - No gradient for batch norm <br> - Drop last batch if not complete <br> - Volatile = false for eval <br> - Poly Decay every 10 iterations <br> - learnable upsampling with transposed convolution  | 35.91 |
 | base-102 | Exactly like base-101, except <br> - no polynomial decay <br> - fixed bilinear upsampling layers| 68.84|
 |base-103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
-|base-104| Exactly like base-103, except <br> -with poly decay every step| **69.78**|
+|base-104| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
