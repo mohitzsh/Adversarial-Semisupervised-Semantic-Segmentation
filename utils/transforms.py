@@ -14,15 +14,15 @@ stats = {
 
 class OneHotEncode(object):
     """
-        Takes a Tensor of size HxW and create one-hot encoding of size nclassxHxW
+        Takes a Tensor of size 1xHxW and create one-hot encoding of size nclassxHxW
     """
     def __init__(self,nclass=21):
         self.nclass = nclass
 
     def __call__(self,label):
-        label_a = np.array(transforms.ToPILImage()(label),np.uint8)
+        label_a = np.array(transforms.ToPILImage()(label.byte().unsqueeze(0)),np.uint8)
 
-        ohlabel = np.zeros((self.nclass,label_a.shape[0],label_a.shape[1]))
+        ohlabel = np.zeros((self.nclass,label_a.shape[0],label_a.shape[1])).astype(np.uint8)
 
         for c in range(self.nclass):
             ohlabel[c:,:,:] = (label_a == c).astype(np.uint8)
@@ -60,7 +60,7 @@ class IgnoreLabelClass(object):
 
 class ToTensorLabel(object):
     """
-        Convert a Label as PIL.Image with 'P' mode and convert to Tensor
+        Take a Label as PIL.Image with 'P' mode and convert to Tensor
     """
     def __init__(self,tensor_type=torch.LongTensor):
         self.tensor_type = tensor_type

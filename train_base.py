@@ -57,7 +57,6 @@ def main():
         co_transform=Compose(co_transform))
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
 
-
     print("Training Data Loaded")
     # Load the valoader
     if args.val_orig:
@@ -83,12 +82,13 @@ def main():
     print("Generator Optimizer Loaded")
 
     if args.mode == 'adv':
-        discriminator = Dis()
+        discriminator = Dis(in_channels=21)
         print("Discriminator Loaded")
 
         # Assumptions made. Paper doesn't clarify the details
         optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
             discriminator.parameters()),lr=0.0001,weight_decay=0.0001)
+        print("Discriminator Optimizer Loaded")
 
     # Load the snapshot if available
     # No pretrained model for the discriminator
@@ -120,13 +120,15 @@ def main():
     print('Training Going to Start')
     for epoch in range(args.start_epoch,args.max_epoch+1):
         generator.train()
-        for batch_id, (img,mask) in enumerate(trainloader):
-            img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False)
+        for batch_id, (img,mask,ohmask) in enumerate(trainloader):
+            img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
+                            Variable(ohmask.cuda(),requires_grad=False)
 
             # Generator Step
             out_img_map = generator(img)
             out_img_map = nn.LogSoftmax()(out_img_map)
 
+            import pdb; pdb.set_trace()
             #Discriminator Step
             conf_map_true = nn.LogSoftmax()(discriminator(ohmask))
             conf_map_true = torch.cat((1- conf_map_true,conf_map_true),dim = 1)

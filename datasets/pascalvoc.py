@@ -49,7 +49,6 @@ class PascalVOC(Dataset):
         image = self.img_transform(image)
         label = self.label_transform(label)
         ohlabel = OneHotEncode()(label)
-        # Rteurn labels as single channel tensor or as one-hot encoded tensor
 
         return image, label, ohlabel
 
