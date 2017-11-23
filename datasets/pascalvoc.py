@@ -4,6 +4,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose
+from utils.transforms import OneHotEncode
 
 def load_image(file):
     return Image.open(file)
@@ -47,8 +48,10 @@ class PascalVOC(Dataset):
         image, label = self.co_transform((image,label))
         image = self.img_transform(image)
         label = self.label_transform(label)
+        ohlabel = OneHotEncode()(label)
+        # Rteurn labels as single channel tensor or as one-hot encoded tensor
 
-        return image, label
+        return image, label, ohlabel
 
     def __len__(self):
         return len(self.img_list)

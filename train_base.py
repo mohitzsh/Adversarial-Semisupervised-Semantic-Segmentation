@@ -8,7 +8,7 @@ import discriminators.discriminator as dis
 from torchvision import transforms
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn,ZeroPadding
+from utils.transforms import RandomSizedCrop, IgnoreLabelClass, ToTensorLabel, NormalizeOwn,ZeroPadding, OneHotEncode
 from utils.lr_scheduling import poly_lr_scheduler
 import torch.nn.functional as F
 import torch.nn as nn
@@ -21,6 +21,7 @@ from utils.validate import val
 from utils.helpers import pascal_palette_invert
 import torchvision.transforms as transforms
 import PIL.Image as Image
+from discriminators.discriminator import Dis
 def main():
 
     home_dir = os.path.dirname(os.path.realpath(__file__))
@@ -31,6 +32,8 @@ def main():
     parser.add_argument("prefix",help="Prefix to identify current experiment")
     parser.add_argument("dataset_dir",help="A directory containing img (Images) \
                         and cls (GT Segmentation) folder")
+    parser.add_argument("--mode",help="base (baseline),adv (adversarial), semi \
+                        (semi-supervised)",choices=('base','adv','semi'),default='base')
     parser.add_argument("--max_epoch",help="Maximum iterations.",default=20,\
                         type=int)
     parser.add_argument("--start_epoch",help="Resume training from this epoch",\
@@ -45,7 +48,7 @@ def main():
     args = parser.parse_args()
 
     # Load the trainloader
-    img_transform = [ToTensor()]
+    img_transform = [ToTensor(),NormalizeOwn()]
     label_transform = [IgnoreLabelClass(),ToTensorLabel()]
     co_transform = [RandomSizedCrop((321,321))]
 
@@ -53,15 +56,16 @@ def main():
     trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), label_transform=Compose(label_transform), \
         co_transform=Compose(co_transform))
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
+
+
     print("Training Data Loaded")
-    # import pdb; pdb.set_trace()
     # Load the valoader
     if args.val_orig:
-        img_transform = [ZeroPadding(),ToTensor()]
+        img_transform = [ZeroPadding(),ToTensor(),NormalizeOwn()]
         label_transform = [IgnoreLabelClass(),ToTensorLabel()]
         co_transform = []
     else:
-        img_transform = [ToTensor()]
+        img_transform = [ToTensor(),NormalizeOwn()]
         label_transforms = [IgnoreLabelClass(),ToTensorLabel()]
         co_transforms = [RandomSizedCrop((321,321))]
 
@@ -69,17 +73,25 @@ def main():
         label_transform = Compose(label_transform),co_transform=Compose(co_transform),train_phase=False)
 
     valoader = DataLoader(valset,batch_size=1)
-
     print("Validation Data Loaded")
-    # import pdb; pdb.set_trace()
     generator = deeplabv2.Res_Deeplab()
     print("Generator Loaded!")
 
-    optimizer = optim.SGD(filter(lambda p: p.requires_grad, \
+    optimizer_G = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
+    print("Generator Optimizer Loaded")
+
+    if args.mode == 'adv':
+        discriminator = Dis()
+        print("Discriminator Loaded")
+
+        # Assumptions made. Paper doesn't clarify the details
+        optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
+            discriminator.parameters()),lr=0.0001,weight_decay=0.0001)
 
     # Load the snapshot if available
+    # No pretrained model for the discriminator
     if  args.snapshot and os.path.isfile(args.snapshot):
         print("Snapshot Available at {} ".format(args.snapshot))
         snapshot = torch.load(args.snapshot)
@@ -87,7 +99,6 @@ def main():
         saved_net = {k.partition('module.')[2]: v for i, (k,v) in enumerate(snapshot['state_dict'].items())}
         new_state.update(saved_net)
         generator.load_state_dict(new_state)
-        # optimizer.load_state_dict(snapshot['optimizer'])
 
     else:
         print("No Snapshot. Loading '{}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
@@ -101,34 +112,67 @@ def main():
     generator = nn.DataParallel(generator).cuda()
     print("Generator Setup for Parallel Training")
 
-    print("Optimizer Loaded")
+    if args.mode == 'adv':
+        discriminator = nn.DataParallel(discriminator).cuda()
+        print("Discriminator Setup for Parallel Training")
+
     best_miou = -1
     print('Training Going to Start')
     for epoch in range(args.start_epoch,args.max_epoch+1):
         generator.train()
         for batch_id, (img,mask) in enumerate(trainloader):
-            img,mask = Variable(img.cuda()),Variable(mask.cuda())
-            # import pdb; pdb.set_trace()
+            img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False)
+
+            # Generator Step
             out_img_map = generator(img)
             out_img_map = nn.LogSoftmax()(out_img_map)
-            L_ce = nn.NLLLoss2d()
-            loss = L_ce(out_img_map,mask)
+
+            #Discriminator Step
+            conf_map_true = nn.LogSoftmax()(discriminator(ohmask))
+            conf_map_true = torch.cat((1- conf_map_true,conf_map_true),dim = 1)
+
+            conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map))
+            conf_map_fake = torch.cat((1- conf_map_fake,conf_map_fake),dim = 1)
+
+            target_true = Variable(torch.ones(conf_map_true.size()).squeeze(1).cuda(),requires_grad=False)
+            target_fake = Variable(torch.zeros(conf_map_fake.size()).squeeze(1).cuda(),requires_grad=False)
+
+            # Segmentation loss
+            L_seg = nn.NLLLoss2d()(out_img_map,mask)
+
+            if args.mode == 'adv':
+                L_seg += nn.NLLLoss2d()(conf_map_fake,target_true)
+
+
+            if args.mode == 'adv':
+                # Discriminator Loss
+                L_d = nn.NLLLoss2d()(conf_map_true,target_true) + nn.NLLLoss2d()(conf_map_fake,target_fake)
+
+
             i = len(trainloader)*(epoch-1) + batch_id
-            poly_lr_scheduler(optimizer, 0.00025, i)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            poly_lr_scheduler(optimizer_G, 0.00025, i)
+
+            # Generator Step
+            optimizer_G.zero_grad()
+            L_seg.backward()
+            optimizer_G.step()
+
+            # Discriminator step
+            optimizer_D.zero_grad()
+            L_d.backward()
+            optimizer_D.step()
+
         print("Epoch {} Finished!".format(epoch))
 
         snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),
-            'optimizer': optimizer.state_dict(),
 
         }
         miou = val(generator,valoader)
 
         snapshot['miou'] = miou
+        print("Epoch: {} miou: {}:".format(epoch,miou))
         if miou > best_miou:
             print("Best miou: {}, at epoch: {}".format(miou,epoch))
             best_miou = miou
