@@ -34,6 +34,9 @@ def main():
                         and cls (GT Segmentation) folder")
     parser.add_argument("--mode",help="base (baseline),adv (adversarial), semi \
                         (semi-supervised)",choices=('base','adv','semi'),default='base')
+    parser.add_argument("--lam_adv",help="Weight for Adversarial loss for Segmentation Network training",\
+                        default=0.01)
+    parser.add_argument("--nogpu",help="Train only on cpus. Helpful for debugging",action='store_true')
     parser.add_argument("--max_epoch",help="Maximum iterations.",default=20,\
                         type=int)
     parser.add_argument("--start_epoch",help="Resume training from this epoch",\
@@ -86,8 +89,8 @@ def main():
         print("Discriminator Loaded")
 
         # Assumptions made. Paper doesn't clarify the details
-        optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
-            discriminator.parameters()),lr=0.0001,weight_decay=0.0001)
+        optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
+            discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
         print("Discriminator Optimizer Loaded")
 
     # Load the snapshot if available
@@ -109,63 +112,107 @@ def main():
         new_state.update(saved_net)
         generator.load_state_dict(new_state)
 
-    generator = nn.DataParallel(generator).cuda()
-    print("Generator Setup for Parallel Training")
+    if not args.nogpu:
+        generator = nn.DataParallel(generator).cuda()
+        # generator = generator.cuda(0)
+        print("Generator Setup for Parallel Training")
+        # print("Generator Loaded on device 0")
+    else:
+        print("No Parallel Training for CPU")
+
 
     if args.mode == 'adv':
-        discriminator = nn.DataParallel(discriminator).cuda()
-        print("Discriminator Setup for Parallel Training")
+        if args.nogpu:
+            print("No Parallel Training for CPU")
+        else:
+            discriminator = nn.DataParallel(discriminator).cuda()
+            # discriminator = discriminator.cuda(1)
+            print("Discriminator Setup for parallel training")
+            # print("Discriminator Loaded on device 1")
 
     best_miou = -1
-    print('Training Going to Start')
     for epoch in range(args.start_epoch,args.max_epoch+1):
         generator.train()
         for batch_id, (img,mask,ohmask) in enumerate(trainloader):
-            img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
-                            Variable(ohmask.cuda(),requires_grad=False)
+            if args.nogpu:
+                img,mask,ohmask = Variable(img),Variable(mask,requires_grad=False),\
+                                Variable(ohmask,requires_grad=False)
+            else:
+                img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
+                                Variable(ohmask.cuda(),requires_grad=False)
 
-            # Generator Step
+            # Generate Prediction Map with the Segmentation Network
             out_img_map = generator(img)
             out_img_map = nn.LogSoftmax()(out_img_map)
 
-            import pdb; pdb.set_trace()
-            #Discriminator Step
-            conf_map_true = nn.LogSoftmax()(discriminator(ohmask))
-            conf_map_true = torch.cat((1- conf_map_true,conf_map_true),dim = 1)
+            #####################
+            # Baseline Training #
+            ####################
+            if args.mode == 'base':
+                print("Baseline Training")
+                L_seg = nn.NLLLoss2d()(out_img_map,mask)
 
-            conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map))
-            conf_map_fake = torch.cat((1- conf_map_fake,conf_map_fake),dim = 1)
+                i = len(trainloader)*(epoch-1) + batch_id
+                poly_lr_scheduler(optimizer_G, 0.00025, i)
 
-            target_true = Variable(torch.ones(conf_map_true.size()).squeeze(1).cuda(),requires_grad=False)
-            target_fake = Variable(torch.zeros(conf_map_fake.size()).squeeze(1).cuda(),requires_grad=False)
+                optimizer_G.zero_grad()
+                L_seg.backward(retain_variables=True)
+                optimizer_G.step()
+                print("[{}][{}]Loss: {}".format(epoch,i,L_seg.data[0]))
 
-            # Segmentation loss
-            L_seg = nn.NLLLoss2d()(out_img_map,mask)
-
+            #######################
+            # Adverarial Training #
+            #######################
             if args.mode == 'adv':
-                L_seg += nn.NLLLoss2d()(conf_map_fake,target_true)
 
+                N = out_img_map.size()[0]
+                H = out_img_map.size()[2]
+                W = out_img_map.size()[3]
 
-            if args.mode == 'adv':
-                # Discriminator Loss
-                L_d = nn.NLLLoss2d()(conf_map_true,target_true) + nn.NLLLoss2d()(conf_map_fake,target_fake)
+                # Generate the Real and Fake Labels
+                target_fake = Variable(torch.zeros((N,H,W)).long(),requires_grad=False)
+                target_real = Variable(torch.ones((N,H,W)).long(),requires_grad=False)
+                if not args.nogpu:
+                    target_fake = target_fake.cuda()
+                    target_real = target_real.cuda()
 
+                #########################
+                # Discriminator Training#
+                #########################
 
-            i = len(trainloader)*(epoch-1) + batch_id
-            poly_lr_scheduler(optimizer_G, 0.00025, i)
+                # Train on Real
+                conf_map_real = nn.LogSoftmax()(discriminator(ohmask.float()))
 
-            # Generator Step
-            optimizer_G.zero_grad()
-            L_seg.backward()
-            optimizer_G.step()
+                optimizer_D.zero_grad()
 
-            # Discriminator step
-            optimizer_D.zero_grad()
-            L_d.backward()
-            optimizer_D.step()
+                LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
+                LD_real.backward()
 
-        print("Epoch {} Finished!".format(epoch))
+                # Train on Fake
+                conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
+                LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
+                LD_fake.backward()
 
+                # Update Discriminator weights
+                i = len(trainloader)*(epoch-1) + batch_id
+                poly_lr_scheduler(optimizer_D, 0.00025, i)
+
+                optimizer_D.step()
+
+                ######################
+                # Generator Training #
+                #####################
+                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map))
+                LG_ce = nn.NLLLoss2d()(out_img_map,mask)
+                LG_adv = args.lam_adv * nn.NLLLoss2d()(conf_map_fake,target_real)
+
+                LG_seg = LG_ce.data[0] + LG_adv.data[0]
+                optimizer_G.zero_grad()
+                LG_ce.backward(retain_variables=True)
+                LG_adv.backward()
+                poly_lr_scheduler(optimizer_G, 0.00025, i)
+                optimizer_G.step()
+                print("[{}][{}] LD: {} LG: {}".format(epoch,i,(LD_real + LD_fake).data[0],LG_seg))
         snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),

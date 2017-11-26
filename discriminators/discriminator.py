@@ -12,16 +12,15 @@ class Dis(nn.Module):
         self._in_channels = in_channels
         self._negative_slope = negative_slope
 
-        self.conv1 = nn.Conv2d(in_channels=self._in_channels,out_channels=64,kernel_size=4,stride=2,padding=1)
-        self.relu1 = nn.LeakyReLU(self._negative_slope)
-        self.conv2 = nn.Conv2d(in_channels=64,out_channels=128,kernel_size=4,stride=2,padding=1)
-        self.relu2 = nn.LeakyReLU(self._negative_slope)
-        self.conv3 = nn.Conv2d(in_channels=128,out_channels=256,kernel_size=4,stride=2,padding=1)
-        self.relu3 = nn.LeakyReLU(self._negative_slope)
-        self.conv4 = nn.Conv2d(in_channels=256,out_channels=512,kernel_size=4,stride=2,padding=1)
-        self.relu4 = nn.LeakyReLU(self._negative_slope)
-
-        self.conv5 = nn.Conv2d(in_channels=512,out_channels=1,kernel_size=4,stride=2,padding=1)
+        self.conv1 = nn.Conv2d(in_channels=self._in_channels,out_channels=64,kernel_size=4,stride=2,padding=2)
+        self.relu1 = nn.LeakyReLU(self._negative_slope,inplace=True)
+        self.conv2 = nn.Conv2d(in_channels=64,out_channels=128,kernel_size=4,stride=2,padding=2)
+        self.relu2 = nn.LeakyReLU(self._negative_slope,inplace=True)
+        self.conv3 = nn.Conv2d(in_channels=128,out_channels=256,kernel_size=4,stride=2,padding=2)
+        self.relu3 = nn.LeakyReLU(self._negative_slope,inplace=True)
+        self.conv4 = nn.Conv2d(in_channels=256,out_channels=512,kernel_size=4,stride=2,padding=2)
+        self.relu4 = nn.LeakyReLU(self._negative_slope,inplace=True)
+        self.conv5 = nn.Conv2d(in_channels=512,out_channels=2,kernel_size=4,stride=2,padding=2)
 
     def forward(self,x):
         x= self.conv1(x) # -,-,161,161
@@ -33,7 +32,6 @@ class Dis(nn.Module):
         x= self.conv4(x) # -,-,21,21
         x = self.relu4(x)
         x = self.conv5(x) # -,-,11,11
-
         # upsample
         x = F.upsample_bilinear(x,scale_factor=2)
         x = x[:,:,:-1,:-1] # -,-, 21,21
