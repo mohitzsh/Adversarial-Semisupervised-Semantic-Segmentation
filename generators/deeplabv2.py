@@ -137,9 +137,6 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=1, dilation__ = 4)
         self.layer5 = self._make_pred_layer(Classifier_Module, [6,12,18,24],[6,12,18,24],NoLabels)
 
-        # self.up_layer2 = nn.ConvTranspose2d(NoLabels,NoLabels,1,stride=2)
-        # self.up_maxpool = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
-        # self.up_conv1 = nn.ConvTranspose2d(NoLabels,NoLabels,7,stride=2,padding=3)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels

@@ -13,6 +13,11 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 
 
 ## Updates
+* ***28th Nov 2017***: 
+* ***27th Nov 2017***: Finally managed to stabilize the GAN training. I couldn't reproduce any significant improvement over the baseline Segmentation Network. In fact, the best performing segmentation network (base104 with mIoU 69.78) was worse off with the adversarial training (mIoU dropped to 68.07). I have documented the details of the experiments performed for adversarial training.
+
+As GAN training is considered to be very sensitive towards weight initialization, I feel this is the right time to incorporate ImageNet pretrained network in the training.
+
 * ***20th Nov 2017***: Started working on adding adversarial learning for base-104 segmentation network.
 
 * ***17th Nov 2017***: Baseline model (base-104) achieved  mean IoU of **69.78** on the full dataset. The model is still significantly away from the target mIoU of 73.6. Only significant component missing from the implementation is using Resnet-101 pre-trained on Imagenet (I am currently using MS-COCO pretrained Network as the baseline). Other minor additions (~~normalization of the input~~ (included in base-105), number of iterations to wait before lr decay, etc) will also be included.  
@@ -22,7 +27,19 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 | Name| Details | mIoU |
 | --- | --- | --- |
 |base-101| - No Normalization <br>  - No gradient for batch norm <br> - Drop last batch if not complete <br> - Volatile = false for eval <br> - Poly Decay every 10 iterations <br> - learnable upsampling with transposed convolution  | 35.91 |
-| base-102 | Exactly like base-101, except <br> - no polynomial decay <br> - fixed bilinear upsampling layers| 68.84|
-|base-103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
-|base-104| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
-|base-105| base-104, except <br> - with normalization of input to 0 mean and unit variance| 68.86|
+| base102 | Exactly like base-101, except <br> - no polynomial decay <br> - fixed bilinear upsampling layers| 68.84|
+|base103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
+|**base104**| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
+|base105| base-104, except <br> - with normalization of input to 0 mean and unit variance| 68.86|
+|base110 | - ImageNet pretrained <br> - Normalization <br> - poly decay(eveyr iter) <br> same lr for all layers| 65.97 (e15) (base110 on cuda.cs) |
+|base111| - Imagenent pretrained <br> - Normalization <br> - poly decay (every iter) <br> - 10x lr for classification module | 63.74 (e6) (base111 on halsteadgpu) |
+### Adversarial Models
+|Name | Details | miou|
+| --- | --- | --- |
+| **adv101**| - base105 as G <br> - Optim(D): SGD lr 0.0001, momentum=0.5,decay= 0.0001 | **68.96** |
+| adv102| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001| 67.14|
+| adv103 | - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) ADAM | 68.07 |
+| adv104 | - base104 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 |63.37 |
+| adv105 | base104 as G <br> - everything else like adv103 | |
+| adv105-cuda| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 <br> - batch size 21| |
+| adv106| - base104 <br> - optim(D) ADAM <br> - batch_size = 21|61.50 |
