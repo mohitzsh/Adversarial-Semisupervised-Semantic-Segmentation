@@ -48,6 +48,8 @@ def main():
                         type=int)
     parser.add_argument("--val_orig", help="Do Inference on original size image.\
                         Otherwise, crop to 321x321 like in training ",action='store_true')
+    parser.add_argument("--d_label_smooth", help="Label smoothing for real images in Discriminator",\
+                        default=0.25,type=float)
     args = parser.parse_args()
 
     # Load the trainloader
@@ -142,13 +144,15 @@ def main():
                                 Variable(ohmask.cuda(),requires_grad=False)
 
             # Generate Prediction Map with the Segmentation Network
-            out_img_map = generator(img)
-            out_img_map = nn.LogSoftmax()(out_img_map)
+
 
             #####################
             # Baseline Training #
             ####################
             if args.mode == 'base':
+                out_img_map = generator(img)
+                out_img_map = nn.LogSoftmax()(out_img_map)
+
                 print("Baseline Training")
                 L_seg = nn.NLLLoss2d()(out_img_map,mask)
 
@@ -156,7 +160,7 @@ def main():
                 poly_lr_scheduler(optimizer_G, 0.00025, i)
 
                 optimizer_G.zero_grad()
-                L_seg.backward(retain_variables=True)
+                L_seg.backward()
                 optimizer_G.step()
                 print("[{}][{}]Loss: {}".format(epoch,i,L_seg.data[0]))
 
@@ -164,6 +168,14 @@ def main():
             # Adverarial Training #
             #######################
             if args.mode == 'adv':
+                # Freeze all the generator parameters
+                # import pdb; pdb.set_trace()
+                # for params in generator.parameters():
+                #     params.requires_grad = False
+                out_img_map = generator(Variable(img.data,volatile=True))
+                out_img_map = nn.LogSoftmax()(out_img_map)
+
+                print("First Forward pass on generator")
 
                 N = out_img_map.size()[0]
                 H = out_img_map.size()[2]
@@ -185,13 +197,20 @@ def main():
 
                 optimizer_D.zero_grad()
 
-                LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
+                # Perform Label smoothing
+                if args.d_label_smooth != 0:
+                    LD_real = (1 - args.d_label_smooth)*nn.NLLLoss2d()(conf_map_real,target_real)
+                    LD_real += args.d_label_smooth * nn.NLLLoss2d()(conf_map_real,target_fake)
+                else:
+                    LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
                 LD_real.backward()
 
                 # Train on Fake
                 conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
+                print("Second forward pass on discriminator")
                 LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
                 LD_fake.backward()
+
 
                 # Update Discriminator weights
                 i = len(trainloader)*(epoch-1) + batch_id
@@ -202,6 +221,14 @@ def main():
                 ######################
                 # Generator Training #
                 #####################
+
+                # Generate the prob map again, keeping the gradients this time
+                for params in generator.parameters():
+                    params.requires_grad = True
+
+                out_img_map = generator(img)
+                out_img_map = nn.LogSoftmax()(out_img_map)
+
                 conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map))
                 LG_ce = nn.NLLLoss2d()(out_img_map,mask)
                 LG_adv = args.lam_adv * nn.NLLLoss2d()(conf_map_fake,target_real)
