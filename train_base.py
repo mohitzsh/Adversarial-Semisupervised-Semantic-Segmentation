@@ -67,6 +67,7 @@ def get_10x_lr_params(model):
 
 def lr_poly(base_lr, iter,max_iter,power):
     return base_lr*((1-float(iter)/max_iter)**(power))
+
 def main():
 
     home_dir = os.path.dirname(os.path.realpath(__file__))
@@ -164,6 +165,7 @@ def main():
                 discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
         print("Discriminator Optimizer Loaded")
 
+    ### TODO: Give choice from commandline to select pretrained models (Imagenet vs MS COCO)
     # Load the snapshot if available
     # if  args.snapshot and os.path.isfile(args.snapshot):
     #     print("Snapshot Available at {} ".format(args.snapshot))
