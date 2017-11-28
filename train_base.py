@@ -50,6 +50,7 @@ def main():
                         Otherwise, crop to 321x321 like in training ",action='store_true')
     parser.add_argument("--d_label_smooth", help="Label smoothing for real images in Discriminator",\
                         default=0.25,type=float)
+    parser.add_argument("--d_optim",help="Discriminator Optimizer.",choices=('sgd','adam'),default='sgd')
     args = parser.parse_args()
 
     # Load the trainloader
@@ -91,8 +92,12 @@ def main():
         print("Discriminator Loaded")
 
         # Assumptions made. Paper doesn't clarify the details
-        optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
-            discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
+        if args.d_optim == 'adam':
+            optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
+                discriminator.parameters()),lr = 0.0001)
+        else:
+            optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
+                discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
         print("Discriminator Optimizer Loaded")
 
     # Load the snapshot if available
@@ -175,7 +180,7 @@ def main():
                 out_img_map = generator(Variable(img.data,volatile=True))
                 out_img_map = nn.LogSoftmax()(out_img_map)
 
-                print("First Forward pass on generator")
+                # print("First Forward pass on generator")
 
                 N = out_img_map.size()[0]
                 H = out_img_map.size()[2]
@@ -207,7 +212,7 @@ def main():
 
                 # Train on Fake
                 conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
-                print("Second forward pass on discriminator")
+                # print("Second forward pass on discriminator")
                 LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
                 LD_fake.backward()
 
@@ -223,8 +228,8 @@ def main():
                 #####################
 
                 # Generate the prob map again, keeping the gradients this time
-                for params in generator.parameters():
-                    params.requires_grad = True
+                # for params in generator.parameters():
+                #     params.requires_grad = True
 
                 out_img_map = generator(img)
                 out_img_map = nn.LogSoftmax()(out_img_map)
