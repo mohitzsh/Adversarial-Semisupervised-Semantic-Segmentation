@@ -26,3 +26,14 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 |base-103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
 |base-104| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
 |base-105| base-104, except <br> - with normalization of input to 0 mean and unit variance| 68.86|
+
+### Adversarial Models
+|Name | Details | miou|
+| --- | --- | --- |
+| adv101| - base105 as G <br> - Optim(D): SGD lr 0.0001, momentum=0.5,decay= 0.0001 | 68.96 |
+| adv102| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001| 67.14(e5)|
+| adv103 | - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) ADAM | 68.07(e17) |
+| adv104 | - base104 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 |63.37 (e12) |
+| adv105 | base104 as G <br> - everything else like adv103 | |
+| adv105-cuda| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 <br> - batch size 21| |
+| adv106| - base104 <br> - optim(D) ADAM <br> - batch_size = 21|61.50 |
