@@ -51,6 +51,7 @@ def main():
     parser.add_argument("--d_label_smooth", help="Label smoothing for real images in Discriminator",\
                         default=0.25,type=float)
     parser.add_argument("--d_optim",help="Discriminator Optimizer.",choices=('sgd','adam'),default='sgd')
+    parser.add_argument("--no_norm",help="No Normalizaion on the Images",action='store_true')
     args = parser.parse_args()
 
     # Load the trainloader
@@ -66,11 +67,17 @@ def main():
     print("Training Data Loaded")
     # Load the valoader
     if args.val_orig:
-        img_transform = [ZeroPadding(),ToTensor(),NormalizeOwn()]
+        if args.no_norm:
+            img_transform = [ZeroPadding(),ToTensor()]
+        else:
+            img_transform = [ZeroPadding(),ToTensor(),NormalizeOwn()]
         label_transform = [IgnoreLabelClass(),ToTensorLabel()]
         co_transform = []
     else:
-        img_transform = [ToTensor(),NormalizeOwn()]
+        if args.no_norm:
+            img_transform = [ToTensor()]
+        else:
+            img_transform = [ToTensor(),NormalizeOwn()]
         label_transforms = [IgnoreLabelClass(),ToTensorLabel()]
         co_transforms = [RandomSizedCrop((321,321))]
 
