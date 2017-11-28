@@ -22,6 +22,51 @@ from utils.helpers import pascal_palette_invert
 import torchvision.transforms as transforms
 import PIL.Image as Image
 from discriminators.discriminator import Dis
+import torch.utils.model_zoo as model_zoo
+
+def get_1x_lr_params(model):
+    """
+    This generator returns all the parameters of the net except for
+    the last classification layer. Note that for each batchnorm layer,
+    requires_grad is set to False in deeplab_resnet.py, therefore this function does not return
+    any batchnorm parameter
+    """
+    model = model.module
+    b = []
+
+    b.append(model.conv1)
+    b.append(model.bn1)
+    b.append(model.layer1)
+    b.append(model.layer2)
+    b.append(model.layer3)
+    b.append(model.layer4)
+
+
+    for i in range(len(b)):
+        for j in b[i].modules():
+            jj = 0
+            for k in j.parameters():
+                jj+=1
+                if k.requires_grad:
+                    yield k
+
+def get_10x_lr_params(model):
+    """
+    This generator returns all the parameters for the last layer of the net,
+    which does the classification of pixel into classes
+    """
+
+    # Get the model from DataParallel
+    model = model.module
+    b = []
+    b.append(model.layer5.parameters())
+
+    for j in range(len(b)):
+        for i in b[j]:
+            yield i
+
+def lr_poly(base_lr, iter,max_iter,power):
+    return base_lr*((1-float(iter)/max_iter)**(power))
 def main():
 
     home_dir = os.path.dirname(os.path.realpath(__file__))
@@ -55,7 +100,11 @@ def main():
     args = parser.parse_args()
 
     # Load the trainloader
-    img_transform = [ToTensor(),NormalizeOwn()]
+    if args.no_norm:
+        img_transform = [ToTensor()]
+    else:
+        img_transform = [ToTensor(),NormalizeOwn()]
+
     label_transform = [IgnoreLabelClass(),ToTensorLabel()]
     co_transform = [RandomSizedCrop((321,321))]
 
@@ -85,9 +134,17 @@ def main():
         label_transform = Compose(label_transform),co_transform=Compose(co_transform),train_phase=False)
 
     valoader = DataLoader(valset,batch_size=1)
-    print("Validation Data Loaded")
     generator = deeplabv2.Res_Deeplab()
-    print("Generator Loaded!")
+
+    # Pretrain on Imagenet Model
+    inet_weights = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
+    del inet_weights['fc.weight']
+    del inet_weights['fc.bias']
+
+    state = generator.state_dict()
+    state.update(inet_weights)
+    generator.load_state_dict(state)
+    print("G pretrained with ImageNet")
 
     optimizer_G = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
@@ -108,23 +165,22 @@ def main():
         print("Discriminator Optimizer Loaded")
 
     # Load the snapshot if available
-    # No pretrained model for the discriminator
-    if  args.snapshot and os.path.isfile(args.snapshot):
-        print("Snapshot Available at {} ".format(args.snapshot))
-        snapshot = torch.load(args.snapshot)
-        new_state = generator.state_dict()
-        saved_net = {k.partition('module.')[2]: v for i, (k,v) in enumerate(snapshot['state_dict'].items())}
-        new_state.update(saved_net)
-        generator.load_state_dict(new_state)
-
-    else:
-        print("No Snapshot. Loading '{}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
-        saved_net = torch.load(os.path.join(home_dir,'data',\
-            'MS_DeepLab_resnet_pretrained_COCO_init.pth'))
-        new_state = generator.state_dict()
-        saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
-        new_state.update(saved_net)
-        generator.load_state_dict(new_state)
+    # if  args.snapshot and os.path.isfile(args.snapshot):
+    #     print("Snapshot Available at {} ".format(args.snapshot))
+    #     snapshot = torch.load(args.snapshot)
+    #     new_state = generator.state_dict()
+    #     saved_net = {k.partition('module.')[2]: v for i, (k,v) in enumerate(snapshot['state_dict'].items())}
+    #     new_state.update(saved_net)
+    #     generator.load_state_dict(new_state)
+    #
+    # else:
+    #     print("No Snapshot. Loading '{}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
+    #     saved_net = torch.load(os.path.join(home_dir,'data',\
+    #         'MS_DeepLab_resnet_pretrained_COCO_init.pth'))
+    #     new_state = generator.state_dict()
+    #     saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
+    #     new_state.update(saved_net)
+    #     generator.load_state_dict(new_state)
 
     if not args.nogpu:
         generator = nn.DataParallel(generator).cuda()
@@ -165,11 +221,15 @@ def main():
                 out_img_map = generator(img)
                 out_img_map = nn.LogSoftmax()(out_img_map)
 
-                print("Baseline Training")
                 L_seg = nn.NLLLoss2d()(out_img_map,mask)
 
                 i = len(trainloader)*(epoch-1) + batch_id
                 poly_lr_scheduler(optimizer_G, 0.00025, i)
+                lr_ = lr_poly(0.00025,i,20000,0.9)
+
+                optimizer_G = optim.SGD([{'params': get_1x_lr_params(generator), 'lr': lr_ },\
+                                        {'params': get_10x_lr_params(generator), 'lr': 10*lr_} ], \
+                                        lr = lr_, momentum = 0.9,weight_decay = 0.0001,nesterov=True)
 
                 optimizer_G.zero_grad()
                 L_seg.backward()

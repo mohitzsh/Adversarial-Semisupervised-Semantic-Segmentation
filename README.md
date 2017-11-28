@@ -26,7 +26,8 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 |base-103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
 |base-104| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
 |base-105| base-104, except <br> - with normalization of input to 0 mean and unit variance| 68.86|
-
+|base110 | - ImageNet pretrained <br> - Normalization <br> - poly decay(eveyr iter) <br> same lr for all layers| (base110 on cuda.cs) |
+|base111| - Imagenent pretrained <br> - Normalization <br> - poly decay (every iter) <br> - 10x lr for classification module | (base111 on halsteadgpu) |
 ### Adversarial Models
 |Name | Details | miou|
 | --- | --- | --- |
