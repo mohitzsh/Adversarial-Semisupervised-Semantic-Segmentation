@@ -13,7 +13,7 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 
 
 ## Updates
-* ***28th Nov 2017***: Started experiments with Imagenet-pretrained Resnet-101 segmentation network.
+* ***28th Nov 2017***: Started experiments with Imagenet-pretrained Resnet-101 segmentation network as the baseline. Best mIoU achieved is **65.97**. So, moving forward to unsupervised training with the base104 (best baseline model) and base105 (baseline with best adversarial training results). 
 
 * ***27th Nov 2017***: Finally managed to stabilize the GAN training. I couldn't reproduce any significant improvement over the baseline Segmentation Network. In fact, the best performing segmentation network (base104 with mIoU 69.78) was worse off with the adversarial training (mIoU dropped to 68.07). I have documented the details of the experiments performed for adversarial training. As GAN training is considered to be very sensitive towards weight initialization, I feel this is the right time to incorporate ImageNet pretrained network in the training.
 
@@ -30,8 +30,8 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 |base103|Exactly like base-102, except<br> - with polynomial decay(every 10 iter))|68.88|
 |**base104**| Exactly like base-103, except <br> -with poly decay (every iter)| **69.78**|
 |base105| base-104, except <br> - with normalization of input to 0 mean and unit variance| 68.86|
-|*base110* (still training) | - ImageNet pretrained <br> - Normalization <br> - poly decay(eveyr iter) <br> same lr for all layers| 65.97 (e15) (base110 on cuda.cs) |
-|*base111*  (still training)| - Imagenent pretrained <br> - Normalization <br> - poly decay (every iter) <br> - 10x lr for classification module | 63.74 (e6) (base111 on halsteadgpu) |
+| base110 | - ImageNet pretrained <br> - Normalization <br> - poly decay(eveyr iter) <br> same lr for all layers| 65.97 |
+| base111 | - Imagenent pretrained <br> - Normalization <br> - poly decay (every iter) <br> - 10x lr for classification module | 65.67 |
 ### Adversarial Models
 |Name | Details | miou|
 | --- | --- | --- |
@@ -39,6 +39,6 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 | adv102| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001| 67.14|
 | adv103 | - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) ADAM | 68.07 |
 | adv104 | - base104 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 |63.37 |
-| adv105 | base104 as G <br> - everything else like adv103 | |
-| adv105-cuda| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 <br> - batch size 21| |
+| adv105 | base104 as G <br> - everything else like adv103 | Very poor (didn't finish training) |
+| adv105-cuda| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 <br> - batch size 21| Very poor (didn't finish training)|
 | adv106| - base104 <br> - optim(D) ADAM <br> - batch_size = 21|61.50 |
