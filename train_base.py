@@ -75,29 +75,51 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("prefix",help="Prefix to identify current experiment")
-    parser.add_argument("dataset_dir",help="A directory containing img (Images) \
-                        and cls (GT Segmentation) folder")
-    parser.add_argument("--mode",help="base (baseline),adv (adversarial), semi \
-                        (semi-supervised)",choices=('base','adv','semi'),default='base')
-    parser.add_argument("--lam_adv",help="Weight for Adversarial loss for Segmentation Network training",\
-                        default=0.01)
-    parser.add_argument("--nogpu",help="Train only on cpus. Helpful for debugging",action='store_true')
-    parser.add_argument("--max_epoch",help="Maximum iterations.",default=20,\
-                        type=int)
-    parser.add_argument("--start_epoch",help="Resume training from this epoch",\
-                        default=1,type=int)
-    parser.add_argument("--snapshot",help="Snapshot to resume training")
-    parser.add_argument("--snapshot_dir",help="Location to store the snapshot", \
-                        default=os.path.join(home_dir,'data','snapshots'))
-    parser.add_argument("--batch_size",help="Batch size for training",default=10,\
-                        type=int)
-    parser.add_argument("--val_orig", help="Do Inference on original size image.\
-                        Otherwise, crop to 321x321 like in training ",action='store_true')
-    parser.add_argument("--d_label_smooth", help="Label smoothing for real images in Discriminator",\
-                        default=0.25,type=float)
-    parser.add_argument("--d_optim",help="Discriminator Optimizer.",choices=('sgd','adam'),default='sgd')
-    parser.add_argument("--no_norm",help="No Normalizaion on the Images",action='store_true')
+    parser.add_argument("prefix",
+                        help="Prefix to identify current experiment")
+
+    parser.add_argument("dataset_dir",
+                        help="A directory containing img (Images) and cls (GT Segmentation) folder")
+
+    parser.add_argument("--mode", choices=('base','adv','semi'),default='base',
+                        help="base (baseline),adv (adversarial), semi (semi-supervised)")
+
+    parser.add_argument("--lam_adv",default=0.01,
+                        help="Weight for Adversarial loss for Segmentation Network training")
+
+    parser.add_argument("--nogpu",action='store_true',
+                        help="Train only on cpus. Helpful for debugging")
+
+    parser.add_argument("--max_epoch",default=20,type=int,
+                        help="Maximum iterations.")
+
+    parser.add_argument("--start_epoch",default=1,type=int,
+                        help="Resume training from this epoch")
+
+    parser.add_argument("--snapshot",
+                        help="Snapshot to resume training")
+
+    parser.add_argument("--snapshot_dir",default=os.path.join(home_dir,'data','snapshots'),
+                        help="Location to store the snapshot")
+
+    parser.add_argument("--batch_size",default=10,type=int,
+                        help="Batch size for training")
+
+    parser.add_argument("--val_orig",action='store_true',
+                        help="Do Inference on original size image. Otherwise, crop to 321x321 like in training ")
+
+    parser.add_argument("--d_label_smooth",default=0.25,type=float,
+                        help="Label smoothing for real images in Discriminator")
+
+    parser.add_argument("--d_optim",choices=('sgd','adam'),default='sgd',
+                        help="Discriminator Optimizer.")
+
+    parser.add_argument("--no_norm",action='store_true',
+                        help="No Normalizaion on the Images")
+
+    parser.add_argument("--init_net",choices=('imagenet','mscoco'),default='mscoco',
+                        help="Pretrained Net for Segmentation Network")
+
     args = parser.parse_args()
 
     # Load the trainloader
@@ -114,7 +136,6 @@ def main():
         co_transform=Compose(co_transform))
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
 
-    print("Training Data Loaded")
     # Load the valoader
     if args.val_orig:
         if args.no_norm:
@@ -137,20 +158,29 @@ def main():
     valoader = DataLoader(valset,batch_size=1)
     generator = deeplabv2.Res_Deeplab()
 
-    # Pretrain on Imagenet Model
-    inet_weights = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
-    del inet_weights['fc.weight']
-    del inet_weights['fc.bias']
+    if args.init_net == 'imagenet':
 
-    state = generator.state_dict()
-    state.update(inet_weights)
-    generator.load_state_dict(state)
-    print("G pretrained with ImageNet")
+        # Pretrain on ImageNet
+        inet_weights = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
+        del inet_weights['fc.weight']
+        del inet_weights['fc.bias']
+        state = generator.state_dict()
+        state.update(inet_weights)
+        generator.load_state_dict(state)
+    elif args.init_net == 'mscoco':
+
+        # Pretrain on MSCOCO
+        filename = os.path.join(home_dir,'data','MS_DeepLab_resnet_pretrained_COCO_init.pth')
+        assert(os.path.isfile(filename))
+        saved_net = torch.load(filename)
+        new_state = generator.state_dict()
+        saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
+        new_state.update(saved_net)
+        generator.load_state_dict(new_state)
 
     optimizer_G = optim.SGD(filter(lambda p: p.requires_grad, \
         generator.parameters()),lr=0.00025,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
-    print("Generator Optimizer Loaded")
 
     if args.mode == 'adv':
         discriminator = Dis(in_channels=21)
@@ -163,44 +193,13 @@ def main():
         else:
             optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
                 discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
-        print("Discriminator Optimizer Loaded")
 
-    ### TODO: Give choice from commandline to select pretrained models (Imagenet vs MS COCO)
-    # Load the snapshot if available
-    # if  args.snapshot and os.path.isfile(args.snapshot):
-    #     print("Snapshot Available at {} ".format(args.snapshot))
-    #     snapshot = torch.load(args.snapshot)
-    #     new_state = generator.state_dict()
-    #     saved_net = {k.partition('module.')[2]: v for i, (k,v) in enumerate(snapshot['state_dict'].items())}
-    #     new_state.update(saved_net)
-    #     generator.load_state_dict(new_state)
-    #
-    # else:
-    #     print("No Snapshot. Loading '{}'".format("MS_DeepLab_resnet_pretrained_COCO_init.pth"))
-    #     saved_net = torch.load(os.path.join(home_dir,'data',\
-    #         'MS_DeepLab_resnet_pretrained_COCO_init.pth'))
-    #     new_state = generator.state_dict()
-    #     saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
-    #     new_state.update(saved_net)
-    #     generator.load_state_dict(new_state)
+        if not args.nogpu:
+            discriminator = nn.DataParallel(discriminator).cuda()
 
     if not args.nogpu:
         generator = nn.DataParallel(generator).cuda()
-        # generator = generator.cuda(0)
-        print("Generator Setup for Parallel Training")
-        # print("Generator Loaded on device 0")
-    else:
-        print("No Parallel Training for CPU")
 
-
-    if args.mode == 'adv':
-        if args.nogpu:
-            print("No Parallel Training for CPU")
-        else:
-            discriminator = nn.DataParallel(discriminator).cuda()
-            # discriminator = discriminator.cuda(1)
-            print("Discriminator Setup for parallel training")
-            # print("Discriminator Loaded on device 1")
 
     best_miou = -1
     for epoch in range(args.start_epoch,args.max_epoch+1):
@@ -212,8 +211,6 @@ def main():
             else:
                 img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
                                 Variable(ohmask.cuda(),requires_grad=False)
-
-            # Generate Prediction Map with the Segmentation Network
 
 
             #####################
@@ -229,6 +226,7 @@ def main():
                 poly_lr_scheduler(optimizer_G, 0.00025, i)
                 lr_ = lr_poly(0.00025,i,20000,0.9)
 
+                # Might Need to change this
                 optimizer_G = optim.SGD([{'params': get_1x_lr_params(generator), 'lr': lr_ },\
                                         {'params': get_10x_lr_params(generator), 'lr': 10*lr_} ], \
                                         lr = lr_, momentum = 0.9,weight_decay = 0.0001,nesterov=True)
@@ -242,12 +240,9 @@ def main():
             # Adverarial Training #
             #######################
             if args.mode == 'adv':
-                # Freeze all the generator parameters
-                # import pdb; pdb.set_trace()
-                # for params in generator.parameters():
-                #     params.requires_grad = False
+
                 out_img_map = generator(Variable(img.data,volatile=True))
-                out_img_map = nn.LogSoftmax()(out_img_map)
+                out_img_map = nn.Softmax2d()(out_img_map)
 
                 # print("First Forward pass on generator")
 
@@ -296,24 +291,24 @@ def main():
                 # Generator Training #
                 #####################
 
-                # Generate the prob map again, keeping the gradients this time
-                # for params in generator.parameters():
-                #     params.requires_grad = True
-
                 out_img_map = generator(img)
-                out_img_map = nn.LogSoftmax()(out_img_map)
+                out_img_map_smax = nn.Softmax2d()(out_img_map)
+                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
 
-                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map))
-                LG_ce = nn.NLLLoss2d()(out_img_map,mask)
-                LG_adv = args.lam_adv * nn.NLLLoss2d()(conf_map_fake,target_real)
+                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map_smax))
 
-                LG_seg = LG_ce.data[0] + LG_adv.data[0]
+
+                LG_ce = nn.NLLLoss2d()(out_img_map_lsmax,mask)
+                LG_adv = nn.NLLLoss2d()(conf_map_fake,target_real)
+
+                LG_seg = LG_ce + args.lam_adv *LG_adv
                 optimizer_G.zero_grad()
-                LG_ce.backward(retain_variables=True)
-                LG_adv.backward()
+                LG_seg.backward()
+
                 poly_lr_scheduler(optimizer_G, 0.00025, i)
                 optimizer_G.step()
-                print("[{}][{}] LD: {} LG: {}".format(epoch,i,(LD_real + LD_fake).data[0],LG_seg))
+                print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f}"\
+                        .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0]))
         snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),
