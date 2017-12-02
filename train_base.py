@@ -120,6 +120,12 @@ def main():
     parser.add_argument("--init_net",choices=('imagenet','mscoco'),default='mscoco',
                         help="Pretrained Net for Segmentation Network")
 
+    parser.add_argument("--d_lr",default=0.0001,type=float,
+                        help="lr for discriminator")
+
+    parser.add_argument("--g_lr",default=0.00025,type=float,
+                        help="lr for generator")
+
     args = parser.parse_args()
 
     # Load the trainloader
@@ -179,7 +185,7 @@ def main():
         generator.load_state_dict(new_state)
 
     optimizer_G = optim.SGD(filter(lambda p: p.requires_grad, \
-        generator.parameters()),lr=0.00025,momentum=0.9,\
+        generator.parameters()),lr=args.g_lr,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
 
     if args.mode == 'adv':
@@ -189,10 +195,10 @@ def main():
         # Assumptions made. Paper doesn't clarify the details
         if args.d_optim == 'adam':
             optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
-                discriminator.parameters()),lr = 0.0001)
+                discriminator.parameters()),lr = args.d_lr)
         else:
             optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
-                discriminator.parameters()),lr=0.0001,weight_decay=0.0001,momentum=0.5,nesterov=True)
+                discriminator.parameters()),lr=args.d_lr,weight_decay=0.0001,momentum=0.5,nesterov=True)
 
         if not args.nogpu:
             discriminator = nn.DataParallel(discriminator).cuda()
@@ -283,7 +289,7 @@ def main():
 
                 # Update Discriminator weights
                 i = len(trainloader)*(epoch-1) + batch_id
-                poly_lr_scheduler(optimizer_D, 0.00025, i)
+                poly_lr_scheduler(optimizer_D, args.d_lr, i)
 
                 optimizer_D.step()
 
@@ -305,7 +311,7 @@ def main():
                 optimizer_G.zero_grad()
                 LG_seg.backward()
 
-                poly_lr_scheduler(optimizer_G, 0.00025, i)
+                poly_lr_scheduler(optimizer_G, args.g_lr, i)
                 optimizer_G.step()
                 print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f}"\
                         .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0]))
