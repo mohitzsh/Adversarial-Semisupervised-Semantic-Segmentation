@@ -45,4 +45,6 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 | adv105-cuda| - base105 <br> - 0.25 label smoothing for real labels in D <br> - Optim(D) SGD lr 0.0001, momentum=0.5,decay= 0.0001 <br> - batch size 21| Very poor (didn't finish training)|
 | adv106| - base104 <br> - optim(D) ADAM <br> - batch_size = 21|61.50 |
 | adv201| - base 105 <br> - label smoothing 0.25 <br> - Adam| 69.33|
-| adv202| - base105 <br> - label smoothing 0.1 <br> - Adam | 69.93(e14) |
+| **adv202**| - base105 <br> - label smoothing 0.1 <br> - d_optim Adam | **69.93** |
+| adv203 | - base105 <br> - label smoothing 0.1 <br> - Adam d_lr = 0.0001 and g_lr =  0.00025  | 69.72|
+| adv204 | - base105 <br> - label smoothing 0.1 <br> - Adam d_lr = 0.00001, g_lr = 0.00025| 69.28|
