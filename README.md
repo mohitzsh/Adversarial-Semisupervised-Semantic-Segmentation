@@ -13,6 +13,10 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
 
 
 ## Updates
+* ***4th Dec 2017***: Started working on Semi-supervised training.
+
+* ***2nd Dec 2017***: Adversarial Training based on base105 improves mIoU from 68.86 to 69.93.
+
 * ***30th Nov 2017***: Managed to improve adversarial training performance. For base105, mIoU was improved from **68.86** to **69.33**.
 
 * ***28th Nov 2017***: Started experiments with Imagenet-pretrained Resnet-101 segmentation network as the baseline. Best mIoU achieved is 65.97. So, moving forward to unsupervised training with the base104 (best baseline model) and base105 (baseline with best adversarial training results).
