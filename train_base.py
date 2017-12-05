@@ -23,6 +23,12 @@ import torchvision.transforms as transforms
 import PIL.Image as Image
 from discriminators.discriminator import Dis
 import torch.utils.model_zoo as model_zoo
+import random
+
+def all_idx(idx, axis):
+    grid = np.ogrid[tuple(map(slice, idx.shape))]
+    grid.insert(axis, idx)
+    return tuple(grid)
 
 def get_1x_lr_params(model):
     """
@@ -87,6 +93,12 @@ def main():
     parser.add_argument("--lam_adv",default=0.01,
                         help="Weight for Adversarial loss for Segmentation Network training")
 
+    parser.add_argument("--lam_semi",default=0.2,
+                        help="Weight for Semi-supervised loss")
+
+    parser.add_argument("--t_semi",default=0.2,
+                        help="Threshold for self-taught learning")
+
     parser.add_argument("--nogpu",action='store_true',
                         help="Train only on cpus. Helpful for debugging")
 
@@ -126,7 +138,17 @@ def main():
     parser.add_argument("--g_lr",default=0.00025,type=float,
                         help="lr for generator")
 
+    parser.add_argument("--seed",default=1,type=int,
+                        help="Seed for random numbers used in semi-supervised training")
+
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if not args.nogpu:
+        torch.cuda.manual_seed_all(args.seed)
+    # effective batch size is args.batch_size*args.splits
+    args.batch_size = args.batch_size*2
 
     # Load the trainloader
     if args.no_norm:
@@ -139,7 +161,7 @@ def main():
 
 
     trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), label_transform=Compose(label_transform), \
-        co_transform=Compose(co_transform))
+        co_transform=Compose(co_transform),split=1)
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
 
     # Load the valoader
@@ -218,6 +240,7 @@ def main():
                 img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
                                 Variable(ohmask.cuda(),requires_grad=False)
 
+            i = len(trainloader)*(epoch-1) + batch_id
 
             #####################
             # Baseline Training #
@@ -228,7 +251,6 @@ def main():
 
                 L_seg = nn.NLLLoss2d()(out_img_map,mask)
 
-                i = len(trainloader)*(epoch-1) + batch_id
                 poly_lr_scheduler(optimizer_G, 0.00025, i)
                 lr_ = lr_poly(0.00025,i,20000,0.9)
 
@@ -249,8 +271,6 @@ def main():
 
                 out_img_map = generator(Variable(img.data,volatile=True))
                 out_img_map = nn.Softmax2d()(out_img_map)
-
-                # print("First Forward pass on generator")
 
                 N = out_img_map.size()[0]
                 H = out_img_map.size()[2]
@@ -282,13 +302,11 @@ def main():
 
                 # Train on Fake
                 conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
-                # print("Second forward pass on discriminator")
                 LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
                 LD_fake.backward()
 
 
                 # Update Discriminator weights
-                i = len(trainloader)*(epoch-1) + batch_id
                 poly_lr_scheduler(optimizer_D, args.d_lr, i)
 
                 optimizer_D.step()
@@ -315,6 +333,99 @@ def main():
                 optimizer_G.step()
                 print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f}"\
                         .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0]))
+
+            ############################
+            # Semi-Supervised Training #
+            ###########################
+            if args.mode == 'semi':
+
+                ## TODO: Extend random interleaving for split of any size
+                mid  = args.batch_size // 2
+                img_1,mask_1,ohmask_1 = img[0:mid,...],mask[0:mid,...],ohmask[0:mid,...]
+                img_2,mask_2,ohmask_2 = img[mid:,...],mask[mid:,...],ohmask[mid:,...]
+
+                # Random Interleaving
+                if random.random() <0.5:
+                    img_l,mask_l,ohmask_l = img_1,mask_1,ohmask_1
+                    img_ul,mask_ul,ohmask_ul = img_2,mask_2,ohmask_2
+                else:
+                    img_ul,mask_ul,ohmask_ul = img_1,mask_1,ohmask_1
+                    img_l,mask_l,ohmask_l = img_2,mask_2,ohmask_2
+
+                ################################################
+                #  Labelled data for Discriminator Training #
+                ################################################
+                out_img_map = generator(Variable(img_l.data,volatile=True))
+                out_img_map = nn.Softmax2d()(out_img_map)
+
+                N = out_img_map.size()[0]
+                H = out_img_map.size()[2]
+                W = out_img_map.size()[3]
+
+                # Generate the Real and Fake Labels
+                target_fake = Variable(torch.zeros((N,H,W)).long())
+                target_real = Variable(torch.ones((N,H,W)).long())
+                if not args.nogpu:
+                    target_fake = target_fake.cuda()
+                    target_real = target_real.cuda()
+
+                # Train on Real
+                conf_map_real = nn.LogSoftmax()(discriminator(ohmask_l.float()))
+
+                optimizer_D.zero_grad()
+
+                # Perform Label smoothing
+                if args.d_label_smooth != 0:
+                    LD_real = (1 - args.d_label_smooth)*nn.NLLLoss2d()(conf_map_real,target_real)
+                    LD_real += args.d_label_smooth * nn.NLLLoss2d()(conf_map_real,target_fake)
+                else:
+                    LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
+
+                LD_real.backward()
+
+                # Train on Fake
+                conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
+                LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
+                LD_fake.backward()
+
+
+                # Update Discriminator weights
+                poly_lr_scheduler(optimizer_D, args.d_lr, i)
+
+                optimizer_D.step()
+
+                ###########################################
+                #  labelled data Generator Training       #
+                ###########################################
+                out_img_map = generator(img_l)
+                out_img_map_smax = nn.Softmax2d()(out_img_map)
+                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
+
+                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map_smax))
+
+
+                LG_ce = nn.NLLLoss2d()(out_img_map_lsmax,mask_l)
+                LG_adv = nn.NLLLoss2d()(conf_map_fake,target_real)
+
+
+                #####################################
+                # Use unlabelled data to get L_semi #
+                #####################################
+                out_img_map = generator(img_ul)
+                soft_pred = nn.Softmax2d()(out_img_map)
+                hard_pred = torch.max(soft_pred,1)
+                conf_map = nn.Softmax2d()(discriminator(Variable(soft_pred.data,volatile=True)))
+
+                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
+                L_semi = out_img_map_lsmax.masked_select(conf_map >= args.t_semi).sum()
+
+                LG_seg = LG_ce + args.lam_adv *LG_adv + args.lam_semi*LG_semi
+                optimizer_G.zero_grad()
+                LG_seg.backward()
+
+                poly_lr_scheduler(optimizer_G, args.g_lr, i)
+                optimizer_G.step()
+                
         snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),
