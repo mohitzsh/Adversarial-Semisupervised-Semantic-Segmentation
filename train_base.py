@@ -24,11 +24,7 @@ import PIL.Image as Image
 from discriminators.discriminator import Dis
 import torch.utils.model_zoo as model_zoo
 import random
-
-def all_idx(idx, axis):
-    grid = np.ogrid[tuple(map(slice, idx.shape))]
-    grid.insert(axis, idx)
-    return tuple(grid)
+import numpy as np
 
 def get_1x_lr_params(model):
     """
@@ -161,7 +157,7 @@ def main():
 
 
     trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), label_transform=Compose(label_transform), \
-        co_transform=Compose(co_transform),split=1)
+        co_transform=Compose(co_transform))
     trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
 
     # Load the valoader
@@ -210,7 +206,7 @@ def main():
         generator.parameters()),lr=args.g_lr,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
 
-    if args.mode == 'adv':
+    if args.mode != 'base':
         discriminator = Dis(in_channels=21)
         print("Discriminator Loaded")
 
@@ -234,11 +230,9 @@ def main():
         generator.train()
         for batch_id, (img,mask,ohmask) in enumerate(trainloader):
             if args.nogpu:
-                img,mask,ohmask = Variable(img),Variable(mask,requires_grad=False),\
-                                Variable(ohmask,requires_grad=False)
+                img,mask,ohmask = Variable(img),Variable(mask),Variable(ohmask)
             else:
-                img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda(),requires_grad=False),\
-                                Variable(ohmask.cuda(),requires_grad=False)
+                img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda()),Variable(ohmask.cuda())
 
             i = len(trainloader)*(epoch-1) + batch_id
 
@@ -411,13 +405,21 @@ def main():
                 #####################################
                 # Use unlabelled data to get L_semi #
                 #####################################
+
                 out_img_map = generator(img_ul)
                 soft_pred = nn.Softmax2d()(out_img_map)
-                hard_pred = torch.max(soft_pred,1)
+                hard_pred = torch.max(soft_pred,1)[1]
                 conf_map = nn.Softmax2d()(discriminator(Variable(soft_pred.data,volatile=True)))
 
+                idx = np.zeros(out_img_map.data.cpu().numpy().shape,dtype=np.uint8)
+                idx = idx.transpose(0, 2, 3, 1)
+
+                conf_mapn = conf_map[:,1,...].data.cpu().numpy()
+                hard_predn = hard_pred.data.cpu().numpy()
+                idx[conf_mapn > args.t_semi] = np.identity(21, dtype=idx.dtype)[hard_predn[ conf_mapn > args.t_semi]]
+
                 out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
-                L_semi = out_img_map_lsmax.masked_select(conf_map >= args.t_semi).sum()
+                LG_semi = -1*out_img_map_lsmax.masked_select(Variable(torch.from_numpy(idx).byte().cuda())).sum()/out_img_map.size()[0]
 
                 LG_seg = LG_ce + args.lam_adv *LG_adv + args.lam_semi*LG_semi
                 optimizer_G.zero_grad()
@@ -425,7 +427,11 @@ def main():
 
                 poly_lr_scheduler(optimizer_G, args.g_lr, i)
                 optimizer_G.step()
-                
+
+                print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f} LG_semi: {:.4f}"\
+                        .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0],LG_semi.data[0]))
+
+
         snapshot = {
             'epoch': epoch,
             'state_dict': generator.state_dict(),
