@@ -400,43 +400,28 @@ def main():
 
                 LG_ce = nn.NLLLoss2d()(out_img_map_lsmax,mask_l)
                 LG_adv = nn.NLLLoss2d()(conf_map_fake,target_real)
-                LG_semi = Variable(torch.zeros(1))
-                LG_seg = LG_ce + args.lam_adv* LG_adv
+
+
                 #####################################
                 # Use unlabelled data to get L_semi #
                 #####################################
 
-                if epoch > 1:
-                    out_img_map = generator(img_ul)
-                    soft_pred = nn.Softmax2d()(out_img_map)
-                    hard_pred = torch.max(soft_pred,1)[1]
-                    conf_map = nn.Softmax2d()(discriminator(Variable(soft_pred.data,volatile=True)))
+                out_img_map = generator(img_ul)
+                soft_pred = nn.Softmax2d()(out_img_map)
+                hard_pred = torch.max(soft_pred,1)[1]
+                conf_map = nn.Softmax2d()(discriminator(Variable(soft_pred.data,volatile=True)))
 
-                    idx = np.zeros(out_img_map.data.cpu().numpy().shape,dtype=np.uint8)
-                    idxt = idx.transpose(0, 2, 3, 1)
+                idx = np.zeros(out_img_map.data.cpu().numpy().shape,dtype=np.uint8)
+                idx = idx.transpose(0, 2, 3, 1)
 
-                    conf_mapn = conf_map[:,1,...].data.cpu().numpy()
-                    hard_predn = hard_pred.data.cpu().numpy()
-                    idxt[conf_mapn > args.t_semi] = np.identity(21, dtype=idx.dtype)[hard_predn[ conf_mapn > args.t_semi]]
+                conf_mapn = conf_map[:,1,...].data.cpu().numpy()
+                hard_predn = hard_pred.data.cpu().numpy()
+                idx[conf_mapn > args.t_semi] = np.identity(21, dtype=idx.dtype)[hard_predn[ conf_mapn > args.t_semi]]
 
-                    ####### Assert idx is correct ########
+                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
+                LG_semi = -1*out_img_map_lsmax.masked_select(Variable(torch.from_numpy(idx).byte().cuda())).mean()
 
-                    # idxc = np.zeros_like(out_img_map.data.cpu().numpy(),dtype=np.uint8)
-                    # for i in range(10):
-                    #     for j in range(321):
-                    #         for k in range(321):
-                    #             if conf_mapn[i][j][k] >args.t_semi:
-                    #                 l = hard_predn[i][j][k]
-                    #                 idxc[i][l][j][k] = 1
-                    #
-                    # import pdb; pdb.set_trace()
-                    # is_correct = np.array_equal(idx,idxc)
-
-                    out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
-                    LG_semi = -1*out_img_map_lsmax.masked_select(Variable(torch.from_numpy(idx).byte().cuda())).sum()/out_img_map.size()[0]
-
-                    LG_seg += args.lam_semi*LG_semi
-
+                LG_seg = LG_ce + args.lam_adv *LG_adv + args.lam_semi*LG_semi
                 optimizer_G.zero_grad()
                 LG_seg.backward()
 
