@@ -26,52 +26,7 @@ import torch.utils.model_zoo as model_zoo
 import random
 import numpy as np
 
-def get_1x_lr_params(model):
-    """
-    This generator returns all the parameters of the net except for
-    the last classification layer. Note that for each batchnorm layer,
-    requires_grad is set to False in deeplab_resnet.py, therefore this function does not return
-    any batchnorm parameter
-    """
-    model = model.module
-    b = []
-
-    b.append(model.conv1)
-    b.append(model.bn1)
-    b.append(model.layer1)
-    b.append(model.layer2)
-    b.append(model.layer3)
-    b.append(model.layer4)
-
-
-    for i in range(len(b)):
-        for j in b[i].modules():
-            jj = 0
-            for k in j.parameters():
-                jj+=1
-                if k.requires_grad:
-                    yield k
-
-def get_10x_lr_params(model):
-    """
-    This generator returns all the parameters for the last layer of the net,
-    which does the classification of pixel into classes
-    """
-
-    # Get the model from DataParallel
-    model = model.module
-    b = []
-    b.append(model.layer5.parameters())
-
-    for j in range(len(b)):
-        for i in b[j]:
-            yield i
-
-def lr_poly(base_lr, iter,max_iter,power):
-    return base_lr*((1-float(iter)/max_iter)**(power))
-
-def main():
-
+def parse_args():
     home_dir = os.path.dirname(os.path.realpath(__file__))
 
     # Parse arguments
@@ -139,92 +94,200 @@ def main():
 
     args = parser.parse_args()
 
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if not args.nogpu:
-        torch.cuda.manual_seed_all(args.seed)
-    # effective batch size is args.batch_size*args.splits
-    args.batch_size = args.batch_size*2
+    return args
 
-    # Load the trainloader
-    if args.no_norm:
-        img_transform = [ToTensor()]
-    else:
-        img_transform = [ToTensor(),NormalizeOwn()]
+'''
+    Snapshot the Best Model
+'''
+def snapshot(model,valoader,epoch,best_miou):
+    miou = val(model,valoader)
+    snapshot = {
+        'epoch': epoch,
+        'state_dict': model.state_dict(),
+        'miou': miou
+    }
+    if miou > best_miou:
+        best_miou = miou
+        torch.save(snapshot,os.path.join(args.snapshot_dir,'{}.pth.tar'.format(args.prefix)))
 
-    label_transform = [IgnoreLabelClass(),ToTensorLabel()]
-    co_transform = [RandomSizedCrop((321,321))]
+    print("[{}] Curr mIoU: {:0.4f} Best mIoU: {}".format(epoch,miou,best_miou))
 
+    return miou
 
-    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), label_transform=Compose(label_transform), \
-        co_transform=Compose(co_transform))
-    trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
-
-    # Load the valoader
-    if args.val_orig:
-        if args.no_norm:
-            img_transform = [ZeroPadding(),ToTensor()]
-        else:
-            img_transform = [ZeroPadding(),ToTensor(),NormalizeOwn()]
-        label_transform = [IgnoreLabelClass(),ToTensorLabel()]
-        co_transform = []
-    else:
-        if args.no_norm:
-            img_transform = [ToTensor()]
-        else:
-            img_transform = [ToTensor(),NormalizeOwn()]
-        label_transforms = [IgnoreLabelClass(),ToTensorLabel()]
-        co_transforms = [RandomSizedCrop((321,321))]
-
-    valset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(img_transform), \
-        label_transform = Compose(label_transform),co_transform=Compose(co_transform),train_phase=False)
-
-    valoader = DataLoader(valset,batch_size=1)
-    generator = deeplabv2.Res_Deeplab()
-
-    if args.init_net == 'imagenet':
-
+'''
+    Use PreTrained Model for Initial Weights
+'''
+def init_weights(model,init_net):
+    if init_net == 'imagenet':
         # Pretrain on ImageNet
         inet_weights = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
         del inet_weights['fc.weight']
         del inet_weights['fc.bias']
-        state = generator.state_dict()
+        state = model.state_dict()
         state.update(inet_weights)
-        generator.load_state_dict(state)
+        model.load_state_dict(state)
     elif args.init_net == 'mscoco':
 
-        # Pretrain on MSCOCO
+        # TODO: Upload the weights somewhere to use load.url()
         filename = os.path.join(home_dir,'data','MS_DeepLab_resnet_pretrained_COCO_init.pth')
         assert(os.path.isfile(filename))
         saved_net = torch.load(filename)
-        new_state = generator.state_dict()
+        new_state = model.state_dict()
         saved_net = {k.partition('Scale.')[2]: v for i, (k,v) in enumerate(saved_net.items())}
         new_state.update(saved_net)
-        generator.load_state_dict(new_state)
+        model.load_state_dict(new_state)
 
-    optimizer_G = optim.SGD(filter(lambda p: p.requires_grad, \
-        generator.parameters()),lr=args.g_lr,momentum=0.9,\
+    return model
+
+'''
+    Baseline Training
+'''
+def train_base(args):
+
+    #######################
+    # Training Dataloader #
+    #######################
+
+    if args.no_norm:
+        imgtr = [ToTensor()]
+    else:
+        imgtr = [ToTensor(),NormalizeOwn()]
+
+    labtr = [IgnoreLabelClass(),ToTensorLabel()]
+    cotr = [RandomSizedCrop((321,321))]
+
+    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), label_transform=Compose(labtr), \
+        co_transform=Compose(cotr))
+    trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
+
+    #########################
+    # Validation Dataloader #
+    ########################
+    if args.val_orig:
+        if args.no_norm:
+            imgtr = [ZeroPadding(),ToTensor()]
+        else:
+            imgtr = [ZeroPadding(),ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = []
+    else:
+        if args.no_norm:
+            imgtr = [ToTensor()]
+        else:
+            imgtr = [ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = [RandomSizedCrop((321,321))]
+
+    valset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), \
+        label_transform = Compose(labtr),co_transform=Compose(cotr),train_phase=False)
+    valoader = DataLoader(valset,batch_size=1)
+
+    model = deeplabv2.ResDeeplab()
+    init_weights(model)
+
+    optimG = optim.SGD(filter(lambda p: p.requires_grad, \
+        model.parameters()),lr=args.g_lr,momentum=0.9,\
         weight_decay=0.0001,nesterov=True)
 
-    if args.mode != 'base':
-        discriminator = Dis(in_channels=21)
-        print("Discriminator Loaded")
+    if not args.nogpu:
+        model = nn.DataParallel(model).cuda()
 
-        # Assumptions made. Paper doesn't clarify the details
-        if args.d_optim == 'adam':
-            optimizer_D = optim.Adam(filter(lambda p: p.requires_grad, \
-                discriminator.parameters()),lr = args.d_lr)
+    best_miou = -1
+    for epoch in range(args.start_epoch,args.max_epoch+1):
+        model.train()
+        for batch_id, (img,mask,_) in enumerate(trainloader):
+
+            if args.nogpu:
+                img,mask = Variable(img),Variable(mask)
+            else:
+                img,mask = Variable(img.cuda()),Variable(mask.cuda())
+
+            itr = len(trainloader)*(epoch-1) + batch_id
+            cprob = generator(img)
+            cprob = nn.LogSoftmax()(cprob)
+
+            Lseg = nn.NLLLoss2d()(cprob,mask)
+
+            poly_lr_scheduler(optimG, args.g_lr, itr)
+            optimG.zero_grad()
+
+            Lseg.backward()
+            optimG.step()
+
+            print("[{}][{}]Loss: {:0.4f}".format(epoch,i,Lseg.data[0]))
+
+        snapshot(model,valoader,epoch,best_miou)
+
+'''
+    Adversarial Training
+'''
+def train_adv(args):
+
+'''
+    Semi-Supervised Training
+'''
+    if args.no_norm:
+        imgtr = [ToTensor()]
+    else:
+        imgtr = [ToTensor(),NormalizeOwn()]
+
+    labtr = [IgnoreLabelClass(),ToTensorLabel()]
+    cotr = [RandomSizedCrop((321,321))]
+
+    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), label_transform=Compose(labtr), \
+        co_transform=Compose(cotr))
+    trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
+
+    #########################
+    # Validation Dataloader #
+    ########################
+    if args.val_orig:
+        if args.no_norm:
+            imgtr = [ZeroPadding(),ToTensor()]
         else:
-            optimizer_D = optim.SGD(filter(lambda p: p.requires_grad, \
-                discriminator.parameters()),lr=args.d_lr,weight_decay=0.0001,momentum=0.5,nesterov=True)
+            imgtr = [ZeroPadding(),ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = []
+    else:
+        if args.no_norm:
+            imgtr = [ToTensor()]
+        else:
+            imgtr = [ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = [RandomSizedCrop((321,321))]
 
-        if not args.nogpu:
-            discriminator = nn.DataParallel(discriminator).cuda()
+    valset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), \
+        label_transform = Compose(labtr),co_transform=Compose(cotr),train_phase=False)
+    valoader = DataLoader(valset,batch_size=1)
+
+    #############
+    # GENERATOR #
+    #############
+    gen = deeplabv2.ResDeeplab()
+    optimG = optim.SGD(filter(lambda p: p.requires_grad, \
+        gen.parameters()),lr=args.g_lr,momentum=0.9,\
+        weight_decay=0.0001,nesterov=True)
 
     if not args.nogpu:
-        generator = nn.DataParallel(generator).cuda()
+        gen = nn.DataParallel(gen).cuda()
 
+    #################
+    # DISCRIMINATOR #
+    ################
+    dis = Dis(in_channels=21)
+    if args.d_optim == 'adam':
+        optimD = optim.Adam(filter(lambda p: p.requires_grad, \
+            dis.parameters()),lr = args.d_lr)
+    else:
+        optimD = optim.SGD(filter(lambda p: p.requires_grad, \
+            dis.parameters()),lr=args.d_lr,weight_decay=0.0001,momentum=0.5,nesterov=True)
 
+    if not args.nogpu:
+        dis = nn.DataParallel(dis).cuda()
+
+    #############
+    # TRAINING  #
+    #############
     best_miou = -1
     for epoch in range(args.start_epoch,args.max_epoch+1):
         generator.train()
@@ -234,219 +297,269 @@ def main():
             else:
                 img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda()),Variable(ohmask.cuda())
 
-            i = len(trainloader)*(epoch-1) + batch_id
+            cpmap = generator(Variable(img.data,volatile=True))
+            cpmap = nn.Softmax2d()(out_img_map)
 
+            N = cpmap.size()[0]
+            H = cpmap.size()[2]
+            W = cpmap.size()[3]
+
+            # Generate the Real and Fake Labels
+            targetf = Variable(torch.zeros((N,H,W)).long(),requires_grad=False)
+            targetr = Variable(torch.ones((N,H,W)).long(),requires_grad=False)
+            if not args.nogpu:
+                targetf = targetf.cuda()
+                targetr = targetr.cuda()
+
+            ##########################
+            # DISCRIMINATOR TRAINING #
+            ##########################
+            optimD.zero_grad()
+
+            # Train on Real
+            confr = nn.LogSoftmax()(discriminator(ohmask.float()))
+            if args.d_label_smooth != 0:
+                LDr = (1 - args.d_label_smooth)*nn.NLLLoss2d()(confr,targetr)
+                LDr += args.d_label_smooth * nn.NLLLoss2d()(confr,targetf)
+            else:
+                LDr = nn.NLLLoss2d()(confr,targetr)
+            LDreal.backward()
+
+            # Train on Fake
+            conff = nn.LogSoftmax()(dis(Variable(cpmap.data)))
+            LDf = nn.NLLLoss2d()(conff,targetf)
+            LDf.backward()
+
+            poly_lr_scheduler(optimD, args.d_lr, i)
+            optimD.step()
+
+            ######################
+            # GENERATOR TRAINING #
             #####################
-            # Baseline Training #
-            ####################
-            if args.mode == 'base':
-                out_img_map = generator(img)
-                out_img_map = nn.LogSoftmax()(out_img_map)
+            optimG.zero_grad()
 
-                L_seg = nn.NLLLoss2d()(out_img_map,mask)
-
-                poly_lr_scheduler(optimizer_G, 0.00025, i)
-                lr_ = lr_poly(0.00025,i,20000,0.9)
-
-                # Might Need to change this
-                optimizer_G = optim.SGD([{'params': get_1x_lr_params(generator), 'lr': lr_ },\
-                                        {'params': get_10x_lr_params(generator), 'lr': 10*lr_} ], \
-                                        lr = lr_, momentum = 0.9,weight_decay = 0.0001,nesterov=True)
-
-                optimizer_G.zero_grad()
-                L_seg.backward()
-                optimizer_G.step()
-                print("[{}][{}]Loss: {}".format(epoch,i,L_seg.data[0]))
-
-            #######################
-            # Adverarial Training #
-            #######################
-            if args.mode == 'adv':
-
-                out_img_map = generator(Variable(img.data,volatile=True))
-                out_img_map = nn.Softmax2d()(out_img_map)
-
-                N = out_img_map.size()[0]
-                H = out_img_map.size()[2]
-                W = out_img_map.size()[3]
-
-                # Generate the Real and Fake Labels
-                target_fake = Variable(torch.zeros((N,H,W)).long(),requires_grad=False)
-                target_real = Variable(torch.ones((N,H,W)).long(),requires_grad=False)
-                if not args.nogpu:
-                    target_fake = target_fake.cuda()
-                    target_real = target_real.cuda()
-
-                #########################
-                # Discriminator Training#
-                #########################
-
-                # Train on Real
-                conf_map_real = nn.LogSoftmax()(discriminator(ohmask.float()))
-
-                optimizer_D.zero_grad()
-
-                # Perform Label smoothing
-                if args.d_label_smooth != 0:
-                    LD_real = (1 - args.d_label_smooth)*nn.NLLLoss2d()(conf_map_real,target_real)
-                    LD_real += args.d_label_smooth * nn.NLLLoss2d()(conf_map_real,target_fake)
-                else:
-                    LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
-                LD_real.backward()
-
-                # Train on Fake
-                conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
-                LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
-                LD_fake.backward()
+            cmap = gen(img)
+            cpmapsmax = nn.Softmax2d()(cmap)
+            cpmaplsmax = nn.LogSoftmax()(cmap)
+            conff = nn.LogSoftmax()(dis(cpmapsmax))
 
 
-                # Update Discriminator weights
-                poly_lr_scheduler(optimizer_D, args.d_lr, i)
+            LGce = nn.NLLLoss2d()(cpmaplsmax,mask)
+            LGadv = nn.NLLLoss2d()(conff,targetr)
+            LGseg = LGce + args.lam_adv *LGadv
 
-                optimizer_D.step()
+            LGseg.backward()
+            poly_lr_scheduler(optimG, args.g_lr, i)
+            optimG.step()
 
-                ######################
-                # Generator Training #
-                #####################
+            print("[{}][{}] LD: {:.4f} LDfake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f}"  \
+                    .format(epoch,i,(LDr + LDf).data[0],LDr.data[0],LDf.data[0],LGseg.data[0],LGce.data[0],LGadv.data[0]))
+        snapshot(gen,valoader,epoch,best_miou)
 
-                out_img_map = generator(img)
-                out_img_map_smax = nn.Softmax2d()(out_img_map)
-                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
+def train_semi(args):
+    # TODO: Make it more generic to include for other splits
+    args.batch_size = args.batch_size*2
 
-                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map_smax))
+    if args.no_norm:
+        imgtr = [ToTensor()]
+    else:
+        imgtr = [ToTensor(),NormalizeOwn()]
+
+    labtr = [IgnoreLabelClass(),ToTensorLabel()]
+    cotr = [RandomSizedCrop((321,321))]
+
+    trainset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), label_transform=Compose(labtr), \
+        co_transform=Compose(cotr))
+    trainloader = DataLoader(trainset,batch_size=args.batch_size,shuffle=True,num_workers=2,drop_last=True)
+
+    #########################
+    # Validation Dataloader #
+    ########################
+    if args.val_orig:
+        if args.no_norm:
+            imgtr = [ZeroPadding(),ToTensor()]
+        else:
+            imgtr = [ZeroPadding(),ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = []
+    else:
+        if args.no_norm:
+            imgtr = [ToTensor()]
+        else:
+            imgtr = [ToTensor(),NormalizeOwn()]
+        labtr = [IgnoreLabelClass(),ToTensorLabel()]
+        cotr = [RandomSizedCrop((321,321))]
+
+    valset = PascalVOC(home_dir,args.dataset_dir,img_transform=Compose(imgtr), \
+        label_transform = Compose(labtr),co_transform=Compose(cotr),train_phase=False)
+    valoader = DataLoader(valset,batch_size=1)
+    #############
+    # GENERATOR #
+    #############
+    gen = deeplabv2.ResDeeplab()
+    optimG = optim.SGD(filter(lambda p: p.requires_grad, \
+        gen.parameters()),lr=args.g_lr,momentum=0.9,\
+        weight_decay=0.0001,nesterov=True)
+
+    if not args.nogpu:
+        gen = nn.DataParallel(gen).cuda()
+
+    #################
+    # DISCRIMINATOR #
+    ################
+    dis = Dis(in_channels=21)
+    if args.d_optim == 'adam':
+        optimD = optim.Adam(filter(lambda p: p.requires_grad, \
+            dis.parameters()),lr = args.d_lr)
+    else:
+        optimD = optim.SGD(filter(lambda p: p.requires_grad, \
+            dis.parameters()),lr=args.d_lr,weight_decay=0.0001,momentum=0.5,nesterov=True)
+
+    if not args.nogpu:
+        dis = nn.DataParallel(dis).cuda()
+
+    ############
+    # TRAINING #
+    ############
+    for epoch in range(args.start_epoch,args.max_epoch+1):
+        generator.train()
+        for batch_id, (img,mask,ohmask) in enumerate(trainloader):
+            if args.nogpu:
+                img,mask,ohmask = Variable(img),Variable(mask),Variable(ohmask)
+            else:
+                img,mask,ohmask = Variable(img.cuda()),Variable(mask.cuda()),Variable(ohmask.cuda())
+
+        ## TODO: Extend random interleaving for split of any size
+        mid  = args.batch_size // 2
+        img1,mask1,ohmask1 = img[0:mid,...],mask[0:mid,...],ohmask[0:mid,...]
+        img2,mask2,ohmask2 = img[mid:,...],mask[mid:,...],ohmask[mid:,...]
+
+        # Random Interleaving
+        if random.random() <0.5:
+            imgl,maskl,ohmaskl = img1,mask1,ohmask1
+            imgu,masku,ohmasku = img2,mask2,ohmask2
+        else:
+            imgu,masku,ohmasku = img1,mask1,ohmask1
+            imgl,maskl,ohmaskl = img2,mask2,ohmask2
+
+        ################################################
+        #  Labelled data for Discriminator Training #
+        ################################################
+        cpmap = gen(Variable(imgl.data,volatile=True))
+        cpmap = nn.Softmax2d()(cpmap)
+
+        N = cpmap.size()[0]
+        H = cpmap.size()[2]
+        W = cpmap.size()[3]
+
+        # Generate the Real and Fake Labels
+        targetf = Variable(torch.zeros((N,H,W)).long())
+        targetr = Variable(torch.ones((N,H,W)).long())
+        if not args.nogpu:
+            targetf = targetf.cuda()
+            targetr = targetr.cuda()
+
+        # Train on Real
+        confr = nn.LogSoftmax()(discriminator(ohmaskl.float()))
+        optimD.zero_grad()
+        if args.d_label_smooth != 0:
+            LDr = (1 - args.d_label_smooth)*nn.NLLLoss2d()(confr,targetr)
+            LDr += args.d_label_smooth * nn.NLLLoss2d()(confr,targetf)
+        else:
+            LDr = nn.NLLLoss2d()(confr,targetr)
+        LDr.backward()
+
+        # Train on Fake
+        conff = nn.LogSoftmax()(dis(Variable(cpmap.data)))
+        LDf = nn.NLLLoss2d()(conff,targetf)
+        LDf.backward()
+
+        poly_lr_scheduler(optimD, args.d_lr, i)
+        optimD.step()
+
+        ###########################################
+        #  labelled data Generator Training       #
+        ###########################################
+        optimG.zero_grad()
+
+        cpmap = generator(imgl)
+        cpmapsmax = nn.Softmax2d()(out_img_map)
+        cpmaplsmax = nn.LogSoftmax()(out_img_map)
+
+        conff = nn.LogSoftmax()(dis(cpmapsmax))
+
+        LGce = nn.NLLLoss2d()(cpmaplsmax,maskl)
+        LGadv = nn.NLLLoss2d()(conff,targetr)
+
+        LGadv_d = LGadv.data[0]
+        LGce_d = LGce.data[0]
+
+        LGadv = args.lam_adv*LG_adv
+
+        (LGce + LGadv).backward()
+        #####################################
+        # Use unlabelled data to get L_semi #
+        #####################################
+
+        cpmap = generator(imgu)
+        softpred = nn.Softmax2d()(cpmap)
+        hardpred = torch.max(softpred,1)[1].squeeze(1)
+        conf = nn.Softmax2d()(dis(Variable(softpred.data,volatile=True)))
+
+        idx = np.zeros(cpmap.data.cpu().numpy().shape,dtype=np.uint8)
+        idx = idx.transpose(0, 2, 3, 1)
+
+        confnp = conf_map[:,1,...].data.cpu().numpy()
+        hardprednp = hardpred.data.cpu().numpy()
+        idx[conf_mapn > args.t_semi] = np.identity(21, dtype=idx.dtype)[hardprednp[ conf_mapn > args.t_semi]]
+
+        if np.count_nonzero(idx) != 0:
+            cpmaplsmax = nn.LogSoftmax()(cpmap)
+            idx = Variable(torch.from_numpy(idx).byte().cuda())
+            LGsemi_arr = cpmaplsmax.masked_select(idx)
+            LGsemi = -1*LGsemi_arr.mean()
+            LGsemi_d = LGsemi.data[0]
+            LGsemi = args.lam_semi*LGsemi
+            LGsemi.backward()
+        else:
+            LGsemi_d = 0
+        LGseg_d = LGce_d + LGadv_d + LGsemi_d
+
+        poly_lr_scheduler(optimizer_G, args.g_lr, i)
+        optimG.step()
+
+        # Manually free memory! Later, really understand how computation graphs work
+        del idx
+        del conf
+        del confnp
+        del hardpred
+        del softpred
+        del hardpredn
+        del cpmap
+        print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f} LG_semi: {:.4f}"\
+                .format(epoch,i,(LDr + LDf).data[0],LDr.data[0],LDf.data[0],LGseg_d,LGce_d,LGadv_d,LGsemi_d))
+
+    snapshot(gen,valoader,epoch,best_miou)
 
 
-                LG_ce = nn.NLLLoss2d()(out_img_map_lsmax,mask)
-                LG_adv = nn.NLLLoss2d()(conf_map_fake,target_real)
 
-                LG_seg = LG_ce + args.lam_adv *LG_adv
-                optimizer_G.zero_grad()
-                LG_seg.backward()
+def main():
 
-                poly_lr_scheduler(optimizer_G, args.g_lr, i)
-                optimizer_G.step()
-                print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f}"\
-                        .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0]))
+    args = parse_args()
 
-            ############################
-            # Semi-Supervised Training #
-            ###########################
-            if args.mode == 'semi':
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if not args.nogpu:
+        torch.cuda.manual_seed_all(args.seed)
 
-                ## TODO: Extend random interleaving for split of any size
-                mid  = args.batch_size // 2
-                img_1,mask_1,ohmask_1 = img[0:mid,...],mask[0:mid,...],ohmask[0:mid,...]
-                img_2,mask_2,ohmask_2 = img[mid:,...],mask[mid:,...],ohmask[mid:,...]
-
-                # Random Interleaving
-                if random.random() <0.5:
-                    img_l,mask_l,ohmask_l = img_1,mask_1,ohmask_1
-                    img_ul,mask_ul,ohmask_ul = img_2,mask_2,ohmask_2
-                else:
-                    img_ul,mask_ul,ohmask_ul = img_1,mask_1,ohmask_1
-                    img_l,mask_l,ohmask_l = img_2,mask_2,ohmask_2
-
-                ################################################
-                #  Labelled data for Discriminator Training #
-                ################################################
-                out_img_map = generator(Variable(img_l.data,volatile=True))
-                out_img_map = nn.Softmax2d()(out_img_map)
-
-                N = out_img_map.size()[0]
-                H = out_img_map.size()[2]
-                W = out_img_map.size()[3]
-
-                # Generate the Real and Fake Labels
-                target_fake = Variable(torch.zeros((N,H,W)).long())
-                target_real = Variable(torch.ones((N,H,W)).long())
-                if not args.nogpu:
-                    target_fake = target_fake.cuda()
-                    target_real = target_real.cuda()
-
-                # Train on Real
-                conf_map_real = nn.LogSoftmax()(discriminator(ohmask_l.float()))
-
-                optimizer_D.zero_grad()
-
-                # Perform Label smoothing
-                if args.d_label_smooth != 0:
-                    LD_real = (1 - args.d_label_smooth)*nn.NLLLoss2d()(conf_map_real,target_real)
-                    LD_real += args.d_label_smooth * nn.NLLLoss2d()(conf_map_real,target_fake)
-                else:
-                    LD_real = nn.NLLLoss2d()(conf_map_real,target_real)
-
-                LD_real.backward()
-
-                # Train on Fake
-                conf_map_fake = nn.LogSoftmax()(discriminator(Variable(out_img_map.data)))
-                LD_fake = nn.NLLLoss2d()(conf_map_fake,target_fake)
-                LD_fake.backward()
-
-
-                # Update Discriminator weights
-                poly_lr_scheduler(optimizer_D, args.d_lr, i)
-
-                optimizer_D.step()
-
-                ###########################################
-                #  labelled data Generator Training       #
-                ###########################################
-                out_img_map = generator(img_l)
-                out_img_map_smax = nn.Softmax2d()(out_img_map)
-                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
-
-                conf_map_fake = nn.LogSoftmax()(discriminator(out_img_map_smax))
-
-
-                LG_ce = nn.NLLLoss2d()(out_img_map_lsmax,mask_l)
-                LG_adv = nn.NLLLoss2d()(conf_map_fake,target_real)
-
-
-                #####################################
-                # Use unlabelled data to get L_semi #
-                #####################################
-
-                out_img_map = generator(img_ul)
-                soft_pred = nn.Softmax2d()(out_img_map)
-                hard_pred = torch.max(soft_pred,1)[1]
-                conf_map = nn.Softmax2d()(discriminator(Variable(soft_pred.data,volatile=True)))
-
-                idx = np.zeros(out_img_map.data.cpu().numpy().shape,dtype=np.uint8)
-                idx = idx.transpose(0, 2, 3, 1)
-
-                conf_mapn = conf_map[:,1,...].data.cpu().numpy()
-                hard_predn = hard_pred.data.cpu().numpy()
-                idx[conf_mapn > args.t_semi] = np.identity(21, dtype=idx.dtype)[hard_predn[ conf_mapn > args.t_semi]]
-
-                out_img_map_lsmax = nn.LogSoftmax()(out_img_map)
-                LG_semi = -1*out_img_map_lsmax.masked_select(Variable(torch.from_numpy(idx).byte().cuda())).mean()
-
-                LG_seg = LG_ce + args.lam_adv *LG_adv + args.lam_semi*LG_semi
-                optimizer_G.zero_grad()
-                LG_seg.backward()
-
-                poly_lr_scheduler(optimizer_G, args.g_lr, i)
-                optimizer_G.step()
-
-                print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f} LG_semi: {:.4f}"\
-                        .format(epoch,i,(LD_real + LD_fake).data[0],LD_real.data[0],LD_fake.data[0],LG_seg.data[0],LG_ce.data[0],LG_adv.data[0],LG_semi.data[0]))
-
-
-        snapshot = {
-            'epoch': epoch,
-            'state_dict': generator.state_dict(),
-
-        }
-        miou = val(generator,valoader)
-
-        snapshot['miou'] = miou
-        print("Epoch: {} miou: {}:".format(epoch,miou))
-        if miou > best_miou:
-            print("Best miou: {}, at epoch: {}".format(miou,epoch))
-            best_miou = miou
-            torch.save(snapshot,os.path.join(args.snapshot_dir,'{}.pth.tar'.format(args.prefix)))
-            print("Snapshot written")
+    if args.mode == 'base':
+        train_base(args)
+    elif args.mode == 'adv':
+        train_adv(args)
+    else
+        train_semi(args)
 
 
 if __name__ == '__main__':
+
     main()
