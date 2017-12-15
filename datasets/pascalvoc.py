@@ -14,7 +14,7 @@ def read_img_list(filename):
         img_list = []
         for line in f:
             img_list.append(line[:-1])
-    return img_list[:20]
+    return img_list
 
 class PascalVOC(Dataset):
 
