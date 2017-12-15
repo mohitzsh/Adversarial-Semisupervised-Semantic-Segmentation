@@ -56,8 +56,8 @@ class Bottleneck(nn.Module):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, stride=stride, bias=False) # change
         self.bn1 = nn.BatchNorm2d(planes,affine = affine_par)
-        for i in self.bn1.parameters():
-            i.requires_grad = False
+        # for i in self.bn1.parameters():
+            # i.requires_grad = False
         padding = 1
         if dilation_ == 2:
             padding = 2
@@ -66,12 +66,12 @@ class Bottleneck(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, # change
                                padding=padding, bias=False, dilation = dilation_)
         self.bn2 = nn.BatchNorm2d(planes,affine = affine_par)
-        for i in self.bn2.parameters():
-            i.requires_grad = False
+        # for i in self.bn2.parameters():
+            # i.requires_grad = False
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(planes * 4, affine = affine_par)
-        for i in self.bn3.parameters():
-            i.requires_grad = False
+        # for i in self.bn3.parameters():
+            # i.requires_grad = False
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -127,8 +127,8 @@ class ResNet(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64,affine = affine_par)
-        for i in self.bn1.parameters():
-            i.requires_grad = False
+        # for i in self.bn1.parameters():
+            # i.requires_grad = False
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, ceil_mode=True)
         self.layer1 = self._make_layer(block, 64, layers[0])
@@ -144,8 +144,8 @@ class ResNet(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-                for i in m.parameters():
-                   i.requires_grad = False
+                # for i in m.parameters():
+                #    i.requires_grad = False
 
     def _make_layer(self, block, planes, blocks, stride=1,dilation__ = 1):
         downsample = None
@@ -155,8 +155,8 @@ class ResNet(nn.Module):
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(planes * block.expansion,affine = affine_par),
             )
-        for i in downsample._modules['1'].parameters():
-            i.requires_grad = False
+        # for i in downsample._modules['1'].parameters():
+        #     i.requires_grad = False
         layers = []
         layers.append(block(self.inplanes, planes, stride,dilation_=dilation__, downsample = downsample ))
         self.inplanes = planes * block.expansion
@@ -168,35 +168,19 @@ class ResNet(nn.Module):
         return block(dilation_series,padding_series,NoLabels)
 
     def forward(self, x):
-        # print("x : ",x.size())
         x = self.conv1(x)
-        # print("conv1: ",x.size())
         x = self.bn1(x)
-        # print("bn1: ",x.size())
         x = self.relu(x)
-        # print("relu: ",x.size())
         x = self.maxpool(x)
-        # print("maxpool: ",x.size())
         x = self.layer1(x)
-        # print("layer1: ",x.size())
         x = self.layer2(x)
-        # print("layer2: ",x.size())
         x = self.layer3(x)
-        # print("layer3: ",x.size())
         x = self.layer4(x)
-        # print("layer4: ",x.size())
         x = self.layer5(x)
-        # print("layer5: ",x.size())
-        # x = self.up_layer2(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
-
-        # print("up ",x.size())
-        # x = self.up_maxpool(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
-
-        # x = self.up_conv1(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
         return x
 
-def Res_Deeplab(NoLabels=21):
+def ResDeeplab(NoLabels=21):
     return ResNet(Bottleneck,[3, 4, 23, 3],NoLabels)
