@@ -34,7 +34,7 @@ As evident from the above two tables, incorporating adversarial training definit
 However, I was not able to obtain any improvement in the performance by using semi-supervised training (update pending).
 
 ### Qualitative Results on PascalVOC
-<img src="images/base_adv.png" height=321 />
+<img src="images/base_adv.png" >
 ## Updates
 * ***8th Dec 2017***: Semi-supervised Learning with 1/2 of training data treated as unlabeled degrades the performance compare to baseline (68.05 mIoU) and baseline + adversarial training (70.31 mIoU). It might be related to one of the comments of the reviewer that initial predictions by the discriminator might be noisy which renders semi-supervised training unstable during early epochs. The authors have made a comment that semi-supervised training is only applied after 5k iterations. I'll include the results with this addition soon.
 
