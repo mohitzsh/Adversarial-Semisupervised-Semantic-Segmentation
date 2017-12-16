@@ -91,6 +91,9 @@ def parse_args():
     parser.add_argument("--seed",default=1,type=int,
                         help="Seed for random numbers used in semi-supervised training")
 
+    parser.add_argument("--wait_semi",default=0,type=int,
+                        help="Number of Epochs to wait before using semi-supervised loss")
+
     args = parser.parse_args()
 
     return args
@@ -351,6 +354,9 @@ def train_adv(args):
                     .format(epoch,itr,(LDr + LDf).data[0],LDr.data[0],LDf.data[0],LGseg.data[0],LGce.data[0],LGadv.data[0]))
         snapshot(generator,valoader,epoch,best_miou,args.snapshot_dir,args.prefix)
 
+'''
+    Semi supervised training
+'''
 def train_semi(args):
     # TODO: Make it more generic to include for other splits
     args.batch_size = args.batch_size*2
@@ -496,42 +502,46 @@ def train_semi(args):
             #####################################
             # Use unlabelled data to get L_semi #
             #####################################
+            LGsemi_d = 0
+            if epoch > args.wait_semi:
 
-            cpmap = generator(imgu)
-            softpred = nn.Softmax2d()(cpmap)
-            hardpred = torch.max(softpred,1)[1].squeeze(1)
-            conf = nn.Softmax2d()(discriminator(Variable(softpred.data,volatile=True)))
+                cpmap = generator(imgu)
+                softpred = nn.Softmax2d()(cpmap)
+                hardpred = torch.max(softpred,1)[1].squeeze(1)
+                conf = nn.Softmax2d()(discriminator(Variable(softpred.data,volatile=True)))
 
-            idx = np.zeros(cpmap.data.cpu().numpy().shape,dtype=np.uint8)
-            idx = idx.transpose(0, 2, 3, 1)
+                idx = np.zeros(cpmap.data.cpu().numpy().shape,dtype=np.uint8)
+                idx = idx.transpose(0, 2, 3, 1)
 
-            confnp = cpmap[:,1,...].data.cpu().numpy()
-            hardprednp = hardpred.data.cpu().numpy()
-            idx[confnp > args.t_semi] = np.identity(21, dtype=idx.dtype)[hardprednp[ confnp > args.t_semi]]
+                confnp = cpmap[:,1,...].data.cpu().numpy()
+                hardprednp = hardpred.data.cpu().numpy()
+                idx[confnp > args.t_semi] = np.identity(21, dtype=idx.dtype)[hardprednp[ confnp > args.t_semi]]
 
-            if np.count_nonzero(idx) != 0:
-                cpmaplsmax = nn.LogSoftmax()(cpmap)
-                idx = Variable(torch.from_numpy(idx).byte().cuda())
-                LGsemi_arr = cpmaplsmax.masked_select(idx)
-                LGsemi = -1*LGsemi_arr.mean()
-                LGsemi_d = LGsemi.data[0]
-                LGsemi = args.lam_semi*LGsemi
-                LGsemi.backward()
-            else:
-                LGsemi_d = 0
+                if np.count_nonzero(idx) != 0:
+                    cpmaplsmax = nn.LogSoftmax()(cpmap)
+                    idx = Variable(torch.from_numpy(idx).byte().cuda())
+                    LGsemi_arr = cpmaplsmax.masked_select(idx)
+                    LGsemi = -1*LGsemi_arr.mean()
+                    LGsemi_d = LGsemi.data[0]
+                    LGsemi = args.lam_semi*LGsemi
+                    LGsemi.backward()
+                else:
+                    LGsemi_d = 0
+                LGseg_d = LGce_d + LGadv_d + LGsemi_d
+
+                del idx
+                del conf
+                del confnp
+                del hardpred
+                del softpred
+                del hardprednp
+                del cpmap
             LGseg_d = LGce_d + LGadv_d + LGsemi_d
-
             poly_lr_scheduler(optimG, args.g_lr, itr)
             optimG.step()
 
             # Manually free memory! Later, really understand how computation graphs free variables
-            del idx
-            del conf
-            del confnp
-            del hardpred
-            del softpred
-            del hardprednp
-            del cpmap
+
             print("[{}][{}] LD: {:.4f} LD_fake: {:.4f} LD_real: {:.4f} LG: {:.4f} LG_ce: {:.4f} LG_adv: {:.4f} LG_semi: {:.4f}"\
                     .format(epoch,itr,(LDr + LDf).data[0],LDr.data[0],LDf.data[0],LGseg_d,LGce_d,LGadv_d,LGsemi_d))
 
