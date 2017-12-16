@@ -168,33 +168,17 @@ class ResNet(nn.Module):
         return block(dilation_series,padding_series,NoLabels)
 
     def forward(self, x):
-        # print("x : ",x.size())
         x = self.conv1(x)
-        # print("conv1: ",x.size())
         x = self.bn1(x)
-        # print("bn1: ",x.size())
         x = self.relu(x)
-        # print("relu: ",x.size())
         x = self.maxpool(x)
-        # print("maxpool: ",x.size())
         x = self.layer1(x)
-        # print("layer1: ",x.size())
         x = self.layer2(x)
-        # print("layer2: ",x.size())
         x = self.layer3(x)
-        # print("layer3: ",x.size())
         x = self.layer4(x)
-        # print("layer4: ",x.size())
         x = self.layer5(x)
-        # print("layer5: ",x.size())
-        # x = self.up_layer2(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
-
-        # print("up ",x.size())
-        # x = self.up_maxpool(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
-
-        # x = self.up_conv1(x)
         x = F.upsample_bilinear(x,scale_factor=2)[:,:,:-1,:-1]
         return x
 
