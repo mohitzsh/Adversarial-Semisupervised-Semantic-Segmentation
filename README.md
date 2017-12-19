@@ -11,32 +11,29 @@ This is a submission (under development) for ICLR 2018 Reproducibility Challenge
  |Baseline + Adversarial Training| 72.6 &emsp; &emsp; &nbsp;  74.9|
  |Baseline + Adversarial Training + <br> Semi-supervised Learning|73.2 &emsp; &emsp; &nbsp;  NA|
 
-## Comments on Reproducibility
+## Results Reproduced
 Following table summarizes the results I have been able to reproduce for the full dataset. For the full dataset, only the performance of the adversarial training on top of baseline can be evaluated.
 
 
 | Method (Full Dataset) | Original | Challenge |
 | --- | --- | --- |
-| Baseline (Resnet-101) | 73.6  | 68.86 |
-|Baseline + Adversarial Training|  74.9| 69.93 |
+| Baseline (Resnet-101) | 73.6  | 69.98 |
+|Baseline + Adversarial Training|  74.9| 70.97 |
 |Baseline + Adversarial Training + <br> Semi-supervised Learning|NA| NA|
 
-Following table summarized the results that I was able to reproduce for the semi-supervised training. Clearly, the semi-supervised training has a negative impact on the performance, even when compared to the baseline. It is highly likely that this behavior is related to one of the comments made by the reviewer. The discriminator during the early epochs in training is probably making noisy predictions which might make the training unstable. I'll update the scores once again by including semi-supervised training only after training discriminator for 5 epochs.
+Following table summarized the results that I was able to reproduce for the semi-supervised training where half of the training data is reserved for semi-supervised training with unlabeled data. 
 
 | Method (1/2 Dataset) | Original | Challenge |
 | --- | --- | --- |
-| Baseline (Resnet-101) | 69.8  | 68.05 |
-|Baseline + Adversarial Training|  72.6| 70.31 |
-|Baseline + Adversarial Training + <br> Semi-supervised Learning|73.2| 66.75|
+| Baseline (Resnet-101) | 69.8  | 67.84 |
+|Baseline + Adversarial Training|  72.6| 68.89 |
+|Baseline + Adversarial Training + <br> Semi-supervised Learning|73.2| 69.05|
 
-As evident from the above two tables, incorporating adversarial training definitely improves the performance of the baseline model. For the full dataset, the improvement is of the similar order compared to the original work. For the 1/2 split dataset, the improvement in the baseline performance with adversarial training is again significant.
-
-However, I was not able to obtain any improvement in the performance by using semi-supervised training (update pending).
-
-### Qualitative Results on PascalVOC
-<img src="images/base_adv.png" >   
 
 ## Updates
+
+* ***18th Dec 2017*** Finished Refactoring of the code, re-ran the experiments and achieved some improvement on the previous results by training the network longer.
+
 * ***8th Dec 2017***: Semi-supervised Learning with 1/2 of training data treated as unlabeled degrades the performance compare to baseline (68.05 mIoU) and baseline + adversarial training (70.31 mIoU). It might be related to one of the comments of the reviewer that initial predictions by the discriminator might be noisy which renders semi-supervised training unstable during early epochs. The authors have made a comment that semi-supervised training is only applied after 5k iterations. I'll include the results with this addition soon.
 
 * ***4th Dec 2017***: Started working on Semi-supervised training.
