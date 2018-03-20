@@ -160,7 +160,7 @@ def train_base(generator,optimG,trainloader,valoader,args):
 
             Lseg = nn.NLLLoss2d()(cprob,mask)
 
-            poly_lr_scheduler(optimG, args.g_lr, itr)
+            optimG = poly_lr_scheduler(optimG, args.g_lr, itr)
             optimG.zero_grad()
 
             Lseg.backward()
@@ -217,7 +217,7 @@ def train_adv(generator,discriminator,optimG,optimD,trainloader,valoader,args):
             LDf = nn.NLLLoss2d()(conff,targetf)
             LDf.backward()
 
-            poly_lr_scheduler(optimD, args.d_lr, itr)
+            optimD = poly_lr_scheduler(optimD, args.d_lr, itr)
             optimD.step()
 
             ######################
@@ -326,7 +326,7 @@ def train_semi(generator,discriminator,optimG,optimD,trainloader_l,trainloader_u
                 LDr_d = LDr.data[0]
                 LDf_d = LDf.data[0]
                 LD_d = LDr_d + LDf_d
-                poly_lr_scheduler(optimD, args.d_lr, itr)
+                optimD = poly_lr_scheduler(optimD, args.d_lr, itr)
                 optimD.step()
 
                 #####################################
@@ -350,7 +350,7 @@ def train_semi(generator,discriminator,optimG,optimD,trainloader_l,trainloader_u
                 LGadv = args.lam_adv*LGadv
 
                 (LGce + LGadv).backward()
-                poly_lr_scheduler(optimG, args.g_lr, itr)
+                optimG = poly_lr_scheduler(optimG, args.g_lr, itr)
                 optimG.step()
 
             else:
@@ -406,7 +406,7 @@ def train_semi(generator,discriminator,optimG,optimD,trainloader_l,trainloader_u
                         LG += LGsemi
 
                     LG.backward()
-                    poly_lr_scheduler(optimG, args.g_lr, itr)
+                    optimG = poly_lr_scheduler(optimG, args.g_lr, itr)
                     optimG.step()
                     # Manually free all variables. Look into details of how variables are freed
                     del idx
