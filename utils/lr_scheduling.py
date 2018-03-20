@@ -11,3 +11,4 @@ def poly_lr_scheduler(optimizer, init_lr, iter, lr_decay_iter=1, max_iter=20000,
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = init_lr*(1 - float(iter)/max_iter)**power
+    return optimizer
