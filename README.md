@@ -21,7 +21,7 @@ Following table summarizes the results I have been able to reproduce for the ful
 |Baseline + Adversarial Training|  74.9| 70.97 |
 |Baseline + Adversarial Training + <br> Semi-supervised Learning|NA| NA|
 
-Following table summarized the results that I was able to reproduce for the semi-supervised training where half of the training data is reserved for semi-supervised training with unlabeled data. 
+Following table summarizes the results I was able to reproduce for the semi-supervised training where half of the training data is reserved for semi-supervised training with unlabeled data. 
 
 | Method (1/2 Dataset) | Original | Challenge |
 | --- | --- | --- |
